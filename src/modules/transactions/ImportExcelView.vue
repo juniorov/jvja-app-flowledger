@@ -12,14 +12,16 @@ const auth = useAuthStore()
 const workspaceStore = useWorkspaceStore()
 const router = useRouter()
 
-const { rows, loading, error, fileName, parseFile, markDuplicates, reset } = useImportExcel()
+const { rows, loading, error, fileName, detectedCurrency, parseFile, markDuplicates, setCurrency, reset } = useImportExcel()
 
 const fileInput = ref(null)
 const saving = ref(false)
 const saveError = ref('')
 const saveSuccess = ref(false)
 const step = ref('pick') // 'pick' | 'preview' | 'done'
-const currency = computed(() => workspaceStore.workspace?.baseCurrency ?? 'CRC')
+
+// Para formatear montos en las cards usamos la moneda detectada (o CRC como fallback visual)
+const previewCurrency = computed(() => detectedCurrency.value ?? 'CRC')
 
 // ── Selección de archivo ──────────────────────────────────────────────────────
 
@@ -255,6 +257,70 @@ function rowAmount(row) {
         </div>
       </div>
 
+      <!-- Moneda detectada o selector manual -->
+      <div class="px-4 pt-3">
+
+        <!-- Moneda detectada automáticamente -->
+        <div
+          v-if="detectedCurrency !== null"
+          class="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl px-3 py-2.5"
+        >
+          <svg class="w-4 h-4 text-status-success shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <span class="text-sm text-neutral-700">
+            Moneda detectada:
+            <span class="font-bold text-neutral-900">{{ detectedCurrency }}</span>
+          </span>
+          <!-- Permite corregir si la detección fue incorrecta -->
+          <div class="ml-auto flex gap-1.5">
+            <button
+              v-for="opt in ['CRC', 'USD']"
+              :key="opt"
+              type="button"
+              class="text-xs font-semibold px-2 py-1 rounded-lg transition"
+              :class="detectedCurrency === opt
+                ? 'bg-primary text-white'
+                : 'bg-white border border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+              @click="setCurrency(opt)"
+            >
+              {{ opt }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Selector manual — moneda no detectada -->
+        <div
+          v-else
+          class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-3"
+        >
+          <div class="flex items-start gap-2 mb-2.5">
+            <svg class="w-4 h-4 text-status-warning mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <p class="text-sm text-neutral-700">
+              No se pudo detectar la moneda automáticamente.
+              <span class="font-semibold">Seleccioná antes de importar:</span>
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-for="opt in ['CRC', 'USD']"
+              :key="opt"
+              type="button"
+              class="flex-1 py-2 rounded-lg border-2 text-sm font-bold transition"
+              :class="'border-neutral-200 bg-white text-neutral-700 hover:border-primary hover:text-primary'"
+              @click="setCurrency(opt)"
+            >
+              {{ opt === 'CRC' ? '₡ Colones' : '$ Dólares' }}
+            </button>
+          </div>
+        </div>
+
+      </div>
+
       <!-- Lista de cards -->
       <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         <div
@@ -289,7 +355,7 @@ function rowAmount(row) {
                   class="text-sm font-bold shrink-0 tabular-nums"
                   :class="row.type === 'income' ? 'text-status-success' : 'text-status-error'"
                 >
-                  {{ row.type === 'income' ? '+' : '−' }}{{ formatAmount(rowAmount(row), currency) }}
+                  {{ row.type === 'income' ? '+' : '−' }}{{ formatAmount(rowAmount(row), previewCurrency) }}
                 </p>
               </div>
               <div class="flex items-center gap-2 mt-1 flex-wrap">
@@ -382,7 +448,7 @@ function rowAmount(row) {
 
         <button
           type="button"
-          :disabled="saving || rowsToImport.length === 0"
+          :disabled="saving || rowsToImport.length === 0 || detectedCurrency === null"
           class="w-full py-3 px-4 rounded-lg bg-primary hover:bg-primary-c text-white font-semibold text-sm min-h-[48px] transition-colors disabled:bg-neutral-200 disabled:text-neutral-500 disabled:cursor-not-allowed"
           @click="handleSave"
         >

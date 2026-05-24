@@ -54,6 +54,24 @@ export function subscribeToTransactions(workspaceId, year, month, onData, onErro
 }
 
 /**
+ * Suscripción en tiempo real a TODAS las transacciones del workspace,
+ * ordenadas por fecha descendente. Usada para el módulo de períodos.
+ *
+ * @param {string} workspaceId
+ * @param {(data: object[]) => void} onData
+ * @param {(err: Error) => void} onError
+ * @returns {() => void}
+ */
+export function subscribeToAllTransactions(workspaceId, onData, onError) {
+  const q = query(txCollection(workspaceId), orderBy('date', 'desc'))
+  return onSnapshot(
+    q,
+    (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    onError
+  )
+}
+
+/**
  * Lee una sola transacción por ID.
  * @param {string} workspaceId
  * @param {string} txId
