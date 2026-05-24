@@ -1,0 +1,1 @@
+"Leé el CLAUDE.md completo. El proyecto está en fase avanzada, ya están implementadas las fases 1-5. Las siguientes tareas pendientes son: 1) Mejorar vista desktop con max-width, sidebar en lugar de bottom nav, y modales centrados. 2) Agregar filtro de moneda (Todos/CRC/USD) en TransactionsView y PeriodsView."
