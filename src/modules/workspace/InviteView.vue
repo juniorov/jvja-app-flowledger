@@ -74,21 +74,26 @@ async function handleAccept() {
   try {
     const { workspaceId, role } = invitation.value
 
-    // 1. Marcar la invitación como aceptada
-    await acceptInvitation(token)
-
-    // 2. Agregar el uid al map members del workspace
+    // 1. Agregar el uid al map members del workspace (PRIMERO: si falla, la invitación sigue disponible)
     await addMember(workspaceId, auth.user.uid, auth.user.email, role)
 
-    // 3. Asociar el workspace al usuario en users/{uid}
+    // 2. Asociar el workspace al usuario en users/{uid}
     await setDoc(
       doc(db, 'users', auth.user.uid),
       { currentWorkspaceId: workspaceId },
       { merge: true }
     )
 
+    // 3. Marcar la invitación como aceptada (solo después de unirse exitosamente)
+    await acceptInvitation(token)
+
     // 4. Recargar el workspace en el store para que la app lo refleje
     await workspaceStore.fetchWorkspace(auth.user.uid)
+
+    // Verificar que el workspace se cargó correctamente
+    if (!workspaceStore.hasWorkspace) {
+      throw new Error('No se pudo cargar el workspace después de unirse.')
+    }
 
     sessionStorage.removeItem('pendingInvite')
     accepted.value = true
