@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseBCRDate, parseCellNumber, parseRawRows } from '../useImportExcel'
+import { parseBCRDate, parseCellNumber, parseRawRows, detectCurrency } from '../useImportExcel'
 
 // ── parseBCRDate ──────────────────────────────────────────────────────────────
 
@@ -65,6 +65,50 @@ describe('parseCellNumber', () => {
 
   it('devuelve 0 para strings no numéricos', () => {
     expect(parseCellNumber('abc')).toBe(0)
+  })
+})
+
+// ── detectCurrency ────────────────────────────────────────────────────────────
+
+describe('detectCurrency', () => {
+  /** Construye rawRows con un valor en fila 5, columna 5 */
+  function rowsWith(cellValue) {
+    const rows = Array.from({ length: 13 }, () => Array(10).fill(''))
+    rows[5][5] = cellValue
+    rows[12] = ['15/03/2024', 'REF001', '', 'TF', 'Test', '', '', 0, 100, 100]
+    return rows
+  }
+
+  it('devuelve CRC cuando la celda es exactamente "CRC"', () => {
+    expect(detectCurrency(rowsWith('CRC'))).toBe('CRC')
+  })
+
+  it('devuelve USD cuando la celda es exactamente "USD"', () => {
+    expect(detectCurrency(rowsWith('USD'))).toBe('USD')
+  })
+
+  it('es case-insensitive (acepta minúsculas)', () => {
+    expect(detectCurrency(rowsWith('crc'))).toBe('CRC')
+    expect(detectCurrency(rowsWith('usd'))).toBe('USD')
+  })
+
+  it('detecta la moneda si está embebida en texto más largo', () => {
+    expect(detectCurrency(rowsWith('Moneda: CRC'))).toBe('CRC')
+    expect(detectCurrency(rowsWith('Cuenta USD Dólares'))).toBe('USD')
+  })
+
+  it('devuelve null si la celda está vacía', () => {
+    expect(detectCurrency(rowsWith(''))).toBeNull()
+  })
+
+  it('devuelve null si el valor no contiene CRC ni USD', () => {
+    expect(detectCurrency(rowsWith('EUR'))).toBeNull()
+    expect(detectCurrency(rowsWith('12345'))).toBeNull()
+  })
+
+  it('devuelve null si el archivo tiene menos de 6 filas', () => {
+    expect(detectCurrency([])).toBeNull()
+    expect(detectCurrency([[], [], []])).toBeNull()
   })
 })
 
@@ -185,6 +229,23 @@ describe('parseRawRows', () => {
     const rows = parseRawRows(buildRawRows(dataRows))
     expect(rows[0].type).toBe('income')
     expect(rows[1].type).toBe('expense')
+  })
+
+  it('asigna la moneda recibida por parámetro a todas las filas', () => {
+    const dataRows = [
+      ['15/03/2024', 'R1', '', 'TF', 'Test', '', '', 0, 100, 100],
+      ['16/03/2024', 'R2', '', 'TF', 'Test', '', '', 0, 200, 300],
+    ]
+    const rowsCRC = parseRawRows(buildRawRows(dataRows), 'f.xlsx', 'CRC')
+    const rowsUSD = parseRawRows(buildRawRows(dataRows), 'f.xlsx', 'USD')
+    expect(rowsCRC.every(r => r.currency === 'CRC')).toBe(true)
+    expect(rowsUSD.every(r => r.currency === 'USD')).toBe(true)
+  })
+
+  it('usa CRC por defecto si no se pasa currency', () => {
+    const dataRows = [['15/03/2024', 'R1', '', 'TF', 'Test', '', '', 0, 100, 100]]
+    const rows = parseRawRows(buildRawRows(dataRows))
+    expect(rows[0].currency).toBe('CRC')
   })
 
   it('usa la columna [3] para code y [4] para description (no [2])', () => {

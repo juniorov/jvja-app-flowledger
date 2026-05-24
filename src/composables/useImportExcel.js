@@ -35,6 +35,22 @@ export function parseCellNumber(val) {
 const DATE_RE = /^\d{1,2}\/\d{1,2}\/\d{4}$/
 
 /**
+ * Detecta la moneda del extracto BCR leyendo la fila 5, columna 5 del archivo.
+ * El BCR coloca 'CRC' o 'USD' en esa celda del encabezado de metadata.
+ *
+ * @param {any[][]} rawRows  resultado de sheet_to_json({ header: 1 })
+ * @returns {'CRC' | 'USD' | null}  null si no se puede determinar
+ */
+export function detectCurrency(rawRows) {
+  const val = String(rawRows[5]?.[5] ?? '').trim().toUpperCase()
+  if (val === 'CRC' || val === 'USD') return val
+  // Coincidencia parcial por si la celda contiene texto más largo (ej: "Moneda: CRC")
+  if (val.includes('CRC')) return 'CRC'
+  if (val.includes('USD')) return 'USD'
+  return null
+}
+
+/**
  * Parsea las filas crudas de SheetJS al modelo de transacción.
  * Auto-detecta la primera fila de datos buscando la primera celda [0] con
  * formato dd/MM/yyyy — sin asumir un número fijo de filas de metadata.
@@ -50,9 +66,10 @@ const DATE_RE = /^\d{1,2}\/\d{1,2}\/\d{4}$/
  *
  * @param {any[][]} rawRows  resultado de sheet_to_json({ header: 1 })
  * @param {string} sourceFile  nombre del archivo origen
+ * @param {'CRC' | 'USD'} currency  moneda a asignar a todas las transacciones
  * @returns {object[]}
  */
-export function parseRawRows(rawRows, sourceFile = '') {
+export function parseRawRows(rawRows, sourceFile = '', currency = 'CRC') {
   // Encontrar la primera fila que tenga una fecha válida en columna 0
   let dataStart = -1
   for (let i = 0; i < rawRows.length; i++) {
@@ -90,7 +107,7 @@ export function parseRawRows(rawRows, sourceFile = '') {
       debit,
       credit,
       balance: parseCellNumber(row[9]),
-      currency: 'CRC',
+      currency,
       type: credit > 0 ? 'income' : 'expense',
       // Campos editables por el usuario
       notes: '',
@@ -122,9 +139,16 @@ export function useImportExcel() {
   const loading = ref(false)
   const error = ref('')
   const fileName = ref('')
+  /**
+   * Moneda detectada automáticamente del encabezado del archivo.
+   * null = no se pudo detectar → el usuario debe elegir manualmente.
+   * @type {import('vue').Ref<'CRC' | 'USD' | null>}
+   */
+  const detectedCurrency = ref(null)
 
   /**
    * Parsea un archivo .xls/.xlsx del BCR y llena `rows`.
+   * Detecta la moneda automáticamente; si no puede, deja detectedCurrency en null.
    * @param {File} file
    */
   async function parseFile(file) {
@@ -132,13 +156,17 @@ export function useImportExcel() {
     error.value = ''
     rows.value = []
     fileName.value = file.name
+    detectedCurrency.value = null
 
     try {
       const buffer = await file.arrayBuffer()
       const workbook = XLSX.read(buffer, { type: 'array', raw: false, cellDates: false })
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
-      rows.value = parseRawRows(rawRows, file.name)
+
+      const currency = detectCurrency(rawRows)
+      detectedCurrency.value = currency
+      rows.value = parseRawRows(rawRows, file.name, currency ?? 'CRC')
 
       if (rows.value.length === 0) {
         error.value =
@@ -151,6 +179,15 @@ export function useImportExcel() {
     } finally {
       loading.value = false
     }
+  }
+
+  /**
+   * Aplica una moneda a todas las filas (para selección manual o corrección del usuario).
+   * @param {'CRC' | 'USD'} currency
+   */
+  function setCurrency(currency) {
+    detectedCurrency.value = currency
+    rows.value = rows.value.map((row) => ({ ...row, currency }))
   }
 
   /**
@@ -180,6 +217,7 @@ export function useImportExcel() {
     error.value = ''
     fileName.value = ''
     loading.value = false
+    detectedCurrency.value = null
   }
 
   return {
@@ -187,8 +225,10 @@ export function useImportExcel() {
     loading,
     error,
     fileName,
+    detectedCurrency,
     parseFile,
     markDuplicates,
+    setCurrency,
     reset,
   }
 }
