@@ -122,31 +122,51 @@ const members = computed(() =>
 // ── Invitaciones ──────────────────────────────────────────────────────────────
 
 const showInviteForm = ref(false)
-const inviteEmail = ref('')
+const invitePartnerId = ref('')
 const inviteRole = ref('viewer')
 const inviting = ref(false)
 const inviteError = ref('')
 const inviteLink = ref('')
 const linkCopied = ref(false)
 
+// Emails de miembros actuales para excluirlos del dropdown
+const memberEmails = computed(() =>
+  Object.values(workspaceStore.workspace?.members ?? {}).map(m => m.email.toLowerCase())
+)
+
+// Socios con email configurado que aún no son miembros del workspace
+const invitablePartners = computed(() =>
+  partners.value
+    .filter(p => p.email)
+    .filter(p => !memberEmails.value.includes(p.email.toLowerCase()))
+    .map(p => ({
+      ...p,
+      label: [p.name, p.lastName].filter(Boolean).join(' '),
+    }))
+)
+
+const selectedPartner = computed(() =>
+  invitablePartners.value.find(p => p.id === invitePartnerId.value) ?? null
+)
+
 function openInviteForm() {
   showInviteForm.value = true
   inviteLink.value = ''
   inviteError.value = ''
-  inviteEmail.value = ''
+  invitePartnerId.value = ''
   inviteRole.value = 'viewer'
 }
 
 function closeInviteForm() {
   showInviteForm.value = false
   inviteLink.value = ''
-  inviteEmail.value = ''
+  invitePartnerId.value = ''
   inviteError.value = ''
 }
 
 async function sendInvite() {
-  if (!inviteEmail.value.trim()) {
-    inviteError.value = 'El email es obligatorio.'
+  if (!invitePartnerId.value || !selectedPartner.value) {
+    inviteError.value = 'Seleccioná un socio para invitar.'
     return
   }
   inviting.value = true
@@ -154,7 +174,7 @@ async function sendInvite() {
   inviteLink.value = ''
   try {
     const token = await createInvitation({
-      email: inviteEmail.value.trim(),
+      email: selectedPartner.value.email,
       workspaceId: workspaceStore.workspaceId,
       workspaceName: workspaceStore.workspace.name,
       role: inviteRole.value,
@@ -281,16 +301,42 @@ async function handleLogout() {
         >
           <p class="text-sm font-semibold text-neutral-900">Nueva invitación</p>
 
-          <!-- Email -->
-          <div>
-            <label class="block text-xs font-medium text-neutral-700 mb-1">Email del invitado</label>
-            <input
-              v-model="inviteEmail"
-              type="email"
-              placeholder="correo@ejemplo.com"
-              :disabled="inviting || !!inviteLink"
-              class="w-full px-3 py-2.5 rounded-lg border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
-            />
+          <!-- Sin socios disponibles -->
+          <div
+            v-if="invitablePartners.length === 0"
+            class="flex items-start gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-3"
+          >
+            <svg class="w-4 h-4 text-neutral-400 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <p class="text-xs text-neutral-500">
+              No hay socios disponibles para invitar. Asegurate de que cada socio tenga email configurado en la sección de Participantes.
+            </p>
+          </div>
+
+          <!-- Dropdown de socios -->
+          <div v-else>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">Socio a invitar</label>
+            <div class="relative">
+              <select
+                v-model="invitePartnerId"
+                :disabled="inviting || !!inviteLink"
+                class="w-full px-3 py-2.5 pr-9 rounded-lg border border-neutral-200 bg-white text-neutral-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50 appearance-none"
+              >
+                <option value="" disabled>Seleccioná un socio…</option>
+                <option v-for="p in invitablePartners" :key="p.id" :value="p.id">
+                  {{ p.label }}
+                </option>
+              </select>
+              <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </div>
+            <p v-if="selectedPartner" class="text-[11px] text-neutral-400 mt-1 truncate">
+              {{ selectedPartner.email }}
+            </p>
           </div>
 
           <!-- Rol -->
@@ -365,7 +411,7 @@ async function handleLogout() {
             <button
               v-if="!inviteLink"
               type="button"
-              :disabled="inviting"
+              :disabled="inviting || invitablePartners.length === 0"
               class="flex-1 py-2.5 rounded-lg bg-primary hover:bg-primary-c text-white font-semibold text-sm min-h-[44px] transition disabled:opacity-50"
               @click="sendInvite"
             >
