@@ -39,47 +39,51 @@ function participantAmount(percentage) {
 <template>
   <div class="space-y-3">
 
-    <!-- Ingresos / Egresos -->
-    <div class="grid grid-cols-2 gap-2">
+    <!--
+      Mobile:  2-col (ingresos + egresos) + saldo ocupa ancho completo debajo
+      Desktop: 3-col en una sola fila (ingresos | egresos | saldo)
+    -->
+    <div class="grid grid-cols-2 gap-2 md:grid-cols-3">
+      <!-- Ingresos -->
       <div class="bg-green-50 rounded-xl px-4 py-3">
         <p class="text-[11px] font-semibold text-status-success uppercase tracking-wide">Ingresos</p>
         <p class="text-base font-bold text-status-success tabular-nums mt-0.5 truncate">
           {{ formatAmount(totalIncome, currency) }}
         </p>
       </div>
+      <!-- Egresos -->
       <div class="bg-red-50 rounded-xl px-4 py-3">
         <p class="text-[11px] font-semibold text-status-error uppercase tracking-wide">Egresos</p>
         <p class="text-base font-bold text-status-error tabular-nums mt-0.5 truncate">
           {{ formatAmount(totalExpense, currency) }}
         </p>
       </div>
-    </div>
-
-    <!-- Saldo neto -->
-    <div
-      class="rounded-xl px-4 py-4"
-      :class="balance >= 0 ? 'bg-primary/10' : 'bg-red-50'"
-    >
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="text-[11px] font-semibold uppercase tracking-wide"
-             :class="balance >= 0 ? 'text-primary' : 'text-status-error'">
-            Saldo neto
-          </p>
-          <p class="text-2xl font-extrabold tabular-nums mt-0.5"
-             :class="balance >= 0 ? 'text-primary' : 'text-status-error'">
-            {{ formatAmount(balance, currency) }}
-          </p>
-        </div>
-        <div
-          class="w-10 h-10 rounded-xl flex items-center justify-center"
-          :class="balance >= 0 ? 'bg-primary/20' : 'bg-red-100'"
-        >
-          <svg class="w-5 h-5" :class="balance >= 0 ? 'text-primary' : 'text-status-error'"
-               viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="12" y1="1" x2="12" y2="23"/>
-            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-          </svg>
+      <!-- Saldo neto: fila completa en mobile, 1 columna en desktop -->
+      <div
+        class="col-span-2 md:col-span-1 rounded-xl px-4 py-3"
+        :class="balance >= 0 ? 'bg-primary/10' : 'bg-red-50'"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-[11px] font-semibold uppercase tracking-wide"
+               :class="balance >= 0 ? 'text-primary' : 'text-status-error'">
+              Saldo neto
+            </p>
+            <p class="text-xl font-extrabold tabular-nums mt-0.5"
+               :class="balance >= 0 ? 'text-primary' : 'text-status-error'">
+              {{ formatAmount(balance, currency) }}
+            </p>
+          </div>
+          <div
+            class="w-8 h-8 rounded-xl flex items-center justify-center"
+            :class="balance >= 0 ? 'bg-primary/20' : 'bg-red-100'"
+          >
+            <svg class="w-4 h-4" :class="balance >= 0 ? 'text-primary' : 'text-status-error'"
+                 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="12" y1="1" x2="12" y2="23"/>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+          </div>
         </div>
       </div>
     </div>

@@ -62,26 +62,32 @@ function editTransaction(tx) {
   <div class="flex flex-col min-h-full">
 
     <!-- Header fijo -->
-    <header class="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-700 px-4 pt-4 pb-3">
+    <header class="sticky top-0 z-10 bg-white border-b border-neutral-100 px-4 pt-4 pb-3">
       <div class="flex items-center justify-between mb-3">
-        <h1 class="text-xl font-bold text-gray-900 dark:text-white">Movimientos</h1>
-        <RouterLink
-          to="/movimientos/nueva"
-          class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-600 text-white text-sm font-semibold min-h-[36px] transition hover:bg-primary-700 active:bg-primary-700"
+        <h1 class="text-xl font-bold text-neutral-900">Movimientos</h1>
+      </div>
+
+      <!-- Filtro de moneda -->
+      <div class="flex gap-1 bg-neutral-100 rounded-xl p-1 mb-3">
+        <button
+          v-for="opt in [{ v: 'all', l: 'Todos' }, { v: 'CRC', l: '₡ CRC' }, { v: 'USD', l: '$ USD' }]"
+          :key="opt.v"
+          type="button"
+          class="flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          :class="store.currencyFilter === opt.v
+            ? 'bg-white text-neutral-900 shadow-sm'
+            : 'text-neutral-500 hover:text-neutral-700'"
+          @click="store.setCurrencyFilter(opt.v)"
         >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          Nueva
-        </RouterLink>
+          {{ opt.l }}
+        </button>
       </div>
 
       <!-- Selector de período -->
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition min-h-[36px] min-w-[36px] flex items-center justify-center"
+          class="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center"
           @click="goToPrevMonth"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -89,14 +95,14 @@ function editTransaction(tx) {
           </svg>
         </button>
 
-        <span class="flex-1 text-center text-sm font-semibold text-gray-800 dark:text-gray-200">
+        <span class="flex-1 text-center text-sm font-semibold text-neutral-800">
           {{ formatMonthYear(store.currentYear, store.currentMonth) }}
         </span>
 
         <button
           type="button"
           :disabled="isCurrentMonth()"
-          class="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition min-h-[36px] min-w-[36px] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
+          class="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition min-h-[36px] min-w-[36px] flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
           @click="goToNextMonth"
         >
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -111,7 +117,7 @@ function editTransaction(tx) {
 
       <!-- Loading -->
       <div v-if="store.loading" class="space-y-3">
-        <div v-for="i in 5" :key="i" class="bg-gray-100 dark:bg-gray-800 rounded-2xl h-16 animate-pulse" />
+        <div v-for="i in 5" :key="i" class="bg-neutral-100 rounded-2xl h-16 animate-pulse" />
       </div>
 
       <!-- Error -->
@@ -119,9 +125,9 @@ function editTransaction(tx) {
         v-else-if="store.error"
         class="flex flex-col items-center gap-2 py-10 text-center"
       >
-        <p class="text-sm text-danger-600 dark:text-danger-400">{{ store.error }}</p>
+        <p class="text-sm text-status-error">{{ store.error }}</p>
         <button
-          class="text-sm text-primary-600 dark:text-primary-400 font-medium"
+          class="text-sm text-primary font-medium"
           @click="store.subscribe(workspaceStore.workspaceId, store.currentYear, store.currentMonth)"
         >
           Reintentar
@@ -129,43 +135,57 @@ function editTransaction(tx) {
       </div>
 
       <!-- Lista agrupada por fecha -->
-      <template v-else-if="store.groupedByDate.length > 0">
-        <div v-for="[dateLabel, txs] in store.groupedByDate" :key="dateLabel" class="space-y-2">
-          <p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide px-1">
+      <template v-else-if="store.filteredGroupedByDate.length > 0">
+        <div v-for="[dateLabel, txs] in store.filteredGroupedByDate" :key="dateLabel" class="space-y-2">
+          <p class="text-xs font-semibold text-neutral-400 uppercase tracking-wide px-1">
             {{ dateLabel }}
           </p>
-          <TransactionCard
-            v-for="tx in txs"
-            :key="tx.id"
-            :transaction="tx"
-            @tap="openDetail"
-          />
+          <div class="grid gap-2 md:grid-cols-2">
+            <TransactionCard
+              v-for="tx in txs"
+              :key="tx.id"
+              :transaction="tx"
+              @tap="openDetail"
+            />
+          </div>
         </div>
       </template>
 
       <!-- Empty state -->
       <div v-else class="flex flex-col items-center justify-center py-16 gap-4 text-center">
-        <div class="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-          <svg class="w-8 h-8 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <div class="w-16 h-16 rounded-2xl bg-neutral-100 flex items-center justify-center">
+          <svg class="w-8 h-8 text-neutral-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <rect x="3" y="3" width="18" height="18" rx="3"/>
             <line x1="3" y1="9" x2="21" y2="9"/>
             <line x1="9" y1="21" x2="9" y2="9"/>
           </svg>
         </div>
         <div>
-          <p class="text-sm font-medium text-gray-600 dark:text-gray-300">Sin movimientos</p>
-          <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">
+          <p class="text-sm font-medium text-neutral-700">Sin movimientos</p>
+          <p class="text-sm text-neutral-400 mt-1">
             No hay transacciones en {{ formatMonthYear(store.currentYear, store.currentMonth) }}.
           </p>
         </div>
         <RouterLink
           to="/movimientos/nueva"
-          class="px-4 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-semibold min-h-[44px] flex items-center"
+          class="px-4 py-2.5 rounded-xl bg-primary text-white text-sm font-semibold min-h-[44px] flex items-center"
         >
           Agregar primera transacción
         </RouterLink>
       </div>
     </div>
+
+    <!-- FAB: nueva transacción -->
+    <RouterLink
+      to="/movimientos/nueva"
+      class="fixed bottom-20 right-4 z-20 w-14 h-14 rounded-full bg-primary text-white shadow-lg flex items-center justify-center hover:bg-primary-c active:scale-95 transition-transform"
+      aria-label="Nueva transacción"
+    >
+      <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/>
+        <line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </RouterLink>
 
     <!-- Bottom sheet: detalle de transacción -->
     <BottomSheet
@@ -180,20 +200,20 @@ function editTransaction(tx) {
           <div
             class="rounded-2xl px-4 py-4 text-center"
             :class="selectedTx.type === 'income'
-              ? 'bg-success-50 dark:bg-success-500/10'
-              : 'bg-danger-50 dark:bg-danger-500/10'"
+              ? 'bg-status-success/10'
+              : 'bg-status-error/10'"
           >
             <p class="text-3xl font-extrabold tabular-nums"
                :class="selectedTx.type === 'income'
-                 ? 'text-success-700 dark:text-success-300'
-                 : 'text-danger-700 dark:text-danger-300'">
+                 ? 'text-status-success'
+                 : 'text-status-error'">
               {{ selectedTx.type === 'income' ? '+' : '−' }}{{ formatAmount(
                 selectedTx.type === 'income' ? selectedTx.credit : selectedTx.debit,
                 selectedTx.currency
               ) }}
             </p>
             <div class="flex items-center justify-center gap-2 mt-1">
-              <span class="text-sm text-gray-500 dark:text-gray-400">
+              <span class="text-sm text-neutral-500">
                 {{ formatDateLong(selectedTx.date) }}
               </span>
               <CurrencyBadge :currency="selectedTx.currency" />
@@ -203,33 +223,33 @@ function editTransaction(tx) {
           <!-- Campos del detalle -->
           <dl class="space-y-3">
             <div v-if="selectedTx.description" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Descripción</dt>
-              <dd class="text-sm text-gray-800 dark:text-gray-200">{{ selectedTx.description }}</dd>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Descripción</dt>
+              <dd class="text-sm text-neutral-800">{{ selectedTx.description }}</dd>
             </div>
             <div v-if="selectedTx.notes" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Notas</dt>
-              <dd class="text-sm text-gray-800 dark:text-gray-200">{{ selectedTx.notes }}</dd>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Notas</dt>
+              <dd class="text-sm text-neutral-800">{{ selectedTx.notes }}</dd>
             </div>
             <div v-if="selectedTx.reference" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Referencia</dt>
-              <dd class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ selectedTx.reference }}</dd>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Referencia</dt>
+              <dd class="text-sm text-neutral-500 font-mono">{{ selectedTx.reference }}</dd>
             </div>
             <div v-if="selectedTx.code" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Código</dt>
-              <dd class="text-sm text-gray-800 dark:text-gray-200">{{ selectedTx.code }}</dd>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Código</dt>
+              <dd class="text-sm text-neutral-800">{{ selectedTx.code }}</dd>
             </div>
             <div v-if="selectedTx.type === 'income'" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Distribuible</dt>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Distribuible</dt>
               <dd class="text-sm">
-                <span v-if="selectedTx.isDistributable" class="text-primary-600 dark:text-primary-400 font-medium">
+                <span v-if="selectedTx.isDistributable" class="text-primary font-medium">
                   Sí {{ selectedTx.fixedCosts ? `· Costos fijos: ${formatAmount(selectedTx.fixedCosts, selectedTx.currency)}` : '' }}
                 </span>
-                <span v-else class="text-gray-400">No</span>
+                <span v-else class="text-neutral-400">No</span>
               </dd>
             </div>
             <div v-if="selectedTx.importedFrom" class="flex flex-col gap-0.5">
-              <dt class="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Importado de</dt>
-              <dd class="text-sm text-gray-500 dark:text-gray-400 truncate">{{ selectedTx.importedFrom }}</dd>
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Importado de</dt>
+              <dd class="text-sm text-neutral-500 truncate">{{ selectedTx.importedFrom }}</dd>
             </div>
           </dl>
 
@@ -237,7 +257,7 @@ function editTransaction(tx) {
           <div class="pt-2 pb-2 space-y-2">
             <button
               type="button"
-              class="w-full py-3 px-4 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-semibold text-sm min-h-[48px] transition hover:bg-gray-50 dark:hover:bg-gray-700"
+              class="w-full py-3 px-4 rounded-xl border border-neutral-200 text-neutral-700 font-semibold text-sm min-h-[48px] transition hover:bg-neutral-50"
               @click="editTransaction(selectedTx)"
             >
               Editar

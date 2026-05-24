@@ -10,6 +10,14 @@ const routes = [
     meta: { public: true },
   },
   {
+    // Ruta pública de aceptación de invitación.
+    // skipAuthRedirect evita que usuarios autenticados sean redirigidos a /balance.
+    path: '/invite/:token',
+    name: 'invite',
+    component: () => import('@/modules/workspace/InviteView.vue'),
+    meta: { public: true, skipAuthRedirect: true },
+  },
+  {
     path: '/workspace/setup',
     name: 'workspace-setup',
     component: () => import('@/modules/workspace/WorkspaceSetupView.vue'),
@@ -67,15 +75,24 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   const workspaceStore = useWorkspaceStore()
 
-  // Rutas públicas: redirigir a la app si ya está autenticado
+  // Rutas públicas
   if (to.meta.public) {
-    if (auth.user) return { path: '/balance' }
+    // Redirigir a la app solo si está autenticado Y la ruta no es la de invitación
+    if (auth.user && !to.meta.skipAuthRedirect) return { path: '/balance' }
     return
   }
 
   // Rutas protegidas: verificar autenticación
   if (!auth.user) {
     return { name: 'login' }
+  }
+
+  // Tras login: si hay una invitación pendiente en sessionStorage, redirigir a ella
+  // Se verifica antes del workspace check para que un usuario nuevo no caiga en /workspace/setup
+  const pendingInvite = sessionStorage.getItem('pendingInvite')
+  if (pendingInvite && to.name !== 'invite') {
+    sessionStorage.removeItem('pendingInvite')
+    return { name: 'invite', params: { token: pendingInvite } }
   }
 
   // Cargar workspace si no está en memoria (una sola vez por sesión)

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { updateWorkspace } from '@/services/workspace.service'
+import { createInvitation } from '@/services/invitation.service'
 import PartnersEditor from '@/shared/components/PartnersEditor.vue'
 
 const auth = useAuthStore()
@@ -107,6 +108,77 @@ async function saveParticipants() {
   }
 }
 
+// ── Miembros del workspace ────────────────────────────────────────────────────
+
+const members = computed(() =>
+  Object.entries(workspaceStore.workspace?.members ?? {}).map(([uid, data]) => ({
+    uid,
+    email: data.email,
+    role: data.role,
+    isCurrentUser: uid === auth.user?.uid,
+  }))
+)
+
+// ── Invitaciones ──────────────────────────────────────────────────────────────
+
+const showInviteForm = ref(false)
+const inviteEmail = ref('')
+const inviteRole = ref('viewer')
+const inviting = ref(false)
+const inviteError = ref('')
+const inviteLink = ref('')
+const linkCopied = ref(false)
+
+function openInviteForm() {
+  showInviteForm.value = true
+  inviteLink.value = ''
+  inviteError.value = ''
+  inviteEmail.value = ''
+  inviteRole.value = 'viewer'
+}
+
+function closeInviteForm() {
+  showInviteForm.value = false
+  inviteLink.value = ''
+  inviteEmail.value = ''
+  inviteError.value = ''
+}
+
+async function sendInvite() {
+  if (!inviteEmail.value.trim()) {
+    inviteError.value = 'El email es obligatorio.'
+    return
+  }
+  inviting.value = true
+  inviteError.value = ''
+  inviteLink.value = ''
+  try {
+    const token = await createInvitation({
+      email: inviteEmail.value.trim(),
+      workspaceId: workspaceStore.workspaceId,
+      workspaceName: workspaceStore.workspace.name,
+      role: inviteRole.value,
+      createdBy: auth.user.uid,
+    })
+    inviteLink.value = `${window.location.origin}/invite/${token}`
+  } catch (err) {
+    inviteError.value = 'No se pudo crear la invitación. Intentá de nuevo.'
+    console.error('[WorkspaceSettings] sendInvite error:', err)
+  } finally {
+    inviting.value = false
+  }
+}
+
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(inviteLink.value)
+    linkCopied.value = true
+    setTimeout(() => { linkCopied.value = false }, 2500)
+  } catch {
+    // fallback: seleccionar el texto
+  }
+}
+
 async function handleLogout() {
   workspaceStore.clearWorkspace()
   await auth.logout()
@@ -148,6 +220,173 @@ async function handleLogout() {
           Moneda por defecto:
           <span class="font-medium text-neutral-700">{{ workspaceStore.workspace.baseCurrency }}</span>
         </p>
+      </div>
+
+      <!-- ── Sección socios / miembros ─────────────────────────────── -->
+      <div v-if="workspaceStore.workspace" class="space-y-3">
+        <div class="flex items-center justify-between">
+          <p class="text-base font-bold text-neutral-900">Socios con acceso</p>
+          <button
+            v-if="workspaceStore.currentUserIsAdmin"
+            type="button"
+            class="flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary-c transition"
+            @click="openInviteForm"
+          >
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Invitar socio
+          </button>
+        </div>
+
+        <!-- Lista de miembros -->
+        <div class="bg-white rounded-xl border border-neutral-200 shadow-sm divide-y divide-neutral-100">
+          <div
+            v-for="m in members"
+            :key="m.uid"
+            class="flex items-center gap-3 px-4 py-3"
+          >
+            <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+              <span class="text-xs font-bold text-primary">
+                {{ (m.email || '?')[0].toUpperCase() }}
+              </span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-neutral-900 truncate">{{ m.email }}</p>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span
+                class="text-[10px] font-bold px-2 py-0.5 rounded-full"
+                :class="m.role === 'admin'
+                  ? 'bg-secondary-purple/10 text-secondary-purple'
+                  : 'bg-neutral-100 text-neutral-500'"
+              >
+                {{ m.role === 'admin' ? 'Admin' : 'Visor' }}
+              </span>
+              <span
+                v-if="m.isCurrentUser"
+                class="text-[10px] font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full"
+              >
+                tú
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Formulario de invitación -->
+        <div
+          v-if="showInviteForm"
+          class="bg-white rounded-xl border border-neutral-200 shadow-sm p-4 space-y-3"
+        >
+          <p class="text-sm font-semibold text-neutral-900">Nueva invitación</p>
+
+          <!-- Email -->
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">Email del invitado</label>
+            <input
+              v-model="inviteEmail"
+              type="email"
+              placeholder="correo@ejemplo.com"
+              :disabled="inviting || !!inviteLink"
+              class="w-full px-3 py-2.5 rounded-lg border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+            />
+          </div>
+
+          <!-- Rol -->
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1">Rol</label>
+            <div class="flex gap-2">
+              <button
+                type="button"
+                class="flex-1 py-2.5 rounded-lg border-2 text-sm font-semibold transition min-h-[44px]"
+                :class="inviteRole === 'viewer'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-neutral-200 text-neutral-500'"
+                :disabled="inviting || !!inviteLink"
+                @click="inviteRole = 'viewer'"
+              >
+                Visor
+              </button>
+              <button
+                type="button"
+                class="flex-1 py-2.5 rounded-lg border-2 text-sm font-semibold transition min-h-[44px]"
+                :class="inviteRole === 'admin'
+                  ? 'border-secondary-purple bg-secondary-purple/10 text-secondary-purple'
+                  : 'border-neutral-200 text-neutral-500'"
+                :disabled="inviting || !!inviteLink"
+                @click="inviteRole = 'admin'"
+              >
+                Administrador
+              </button>
+            </div>
+            <p class="text-[11px] text-neutral-400 mt-1">
+              <template v-if="inviteRole === 'admin'">Puede crear invitaciones, editar y eliminar transacciones.</template>
+              <template v-else>Solo puede ver los movimientos y balances.</template>
+            </p>
+          </div>
+
+          <!-- Error -->
+          <div
+            v-if="inviteError"
+            class="text-sm text-status-error bg-status-error/10 rounded-lg px-3 py-2"
+          >
+            {{ inviteError }}
+          </div>
+
+          <!-- Link generado -->
+          <div v-if="inviteLink" class="space-y-2">
+            <p class="text-xs font-semibold text-status-success flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              Invitación creada. Copiá el link y compartilo.
+            </p>
+            <div class="flex gap-2 items-stretch">
+              <div class="flex-1 bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-2 text-xs text-neutral-600 font-mono truncate flex items-center">
+                {{ inviteLink }}
+              </div>
+              <button
+                type="button"
+                class="shrink-0 px-3 py-2 rounded-lg font-semibold text-xs min-h-[44px] transition"
+                :class="linkCopied
+                  ? 'bg-status-success/10 text-status-success'
+                  : 'bg-primary text-white hover:bg-primary-c'"
+                @click="copyLink"
+              >
+                {{ linkCopied ? '¡Copiado!' : 'Copiar' }}
+              </button>
+            </div>
+            <p class="text-[11px] text-neutral-400">El link expira en 7 días.</p>
+          </div>
+
+          <!-- Acciones del form -->
+          <div class="flex gap-2 pt-1">
+            <button
+              v-if="!inviteLink"
+              type="button"
+              :disabled="inviting"
+              class="flex-1 py-2.5 rounded-lg bg-primary hover:bg-primary-c text-white font-semibold text-sm min-h-[44px] transition disabled:opacity-50"
+              @click="sendInvite"
+            >
+              <span v-if="inviting" class="flex items-center justify-center gap-2">
+                <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                Creando…
+              </span>
+              <span v-else>Crear invitación</span>
+            </button>
+            <button
+              type="button"
+              class="px-4 py-2.5 rounded-lg border border-neutral-200 text-neutral-600 font-semibold text-sm min-h-[44px] hover:bg-neutral-50 transition"
+              @click="closeInviteForm"
+            >
+              {{ inviteLink ? 'Cerrar' : 'Cancelar' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- ── Sección participantes ───────────────────────────────── -->
