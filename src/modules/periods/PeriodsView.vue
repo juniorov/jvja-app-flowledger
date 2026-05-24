@@ -1,17 +1,30 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
+import { useTransactionStore } from '@/stores/useTransactionStore'
 import { usePeriods, groupTransactionsByPeriod } from '@/composables/usePeriods'
 import { formatMonthYear, formatAmount } from '@/shared/utils/formatters'
 
 const workspaceStore = useWorkspaceStore()
+const txStore = useTransactionStore()
 const { transactions, loading, error, subscribe, unsubscribe } = usePeriods()
 
 const partners = computed(() => workspaceStore.workspace?.partners ?? [])
 
-const periods = computed(() =>
+const allPeriods = computed(() =>
   groupTransactionsByPeriod(transactions.value, partners.value)
 )
+
+/** Períodos filtrados por moneda — respeta el filtro compartido del store. */
+const periods = computed(() => {
+  if (txStore.currencyFilter === 'all') return allPeriods.value
+  return allPeriods.value
+    .map((p) => ({
+      ...p,
+      currencies: p.currencies.filter((c) => c.currency === txStore.currencyFilter),
+    }))
+    .filter((p) => p.currencies.length > 0)
+})
 
 onMounted(() => {
   subscribe(workspaceStore.workspaceId)
@@ -26,8 +39,23 @@ onUnmounted(() => {
   <div class="flex flex-col min-h-full">
 
     <!-- Header -->
-    <header class="sticky top-0 z-10 bg-white border-b border-neutral-100 px-4 pt-4 pb-3">
+    <header class="sticky top-0 z-10 bg-white border-b border-neutral-100 px-4 pt-4 pb-3 space-y-3">
       <h1 class="text-xl font-bold text-neutral-900">Balance</h1>
+      <!-- Filtro de moneda -->
+      <div class="flex gap-1 bg-neutral-100 rounded-xl p-1">
+        <button
+          v-for="opt in [{ v: 'all', l: 'Todos' }, { v: 'CRC', l: '₡ CRC' }, { v: 'USD', l: '$ USD' }]"
+          :key="opt.v"
+          type="button"
+          class="flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all"
+          :class="txStore.currencyFilter === opt.v
+            ? 'bg-white text-neutral-900 shadow-sm'
+            : 'text-neutral-500 hover:text-neutral-700'"
+          @click="txStore.setCurrencyFilter(opt.v)"
+        >
+          {{ opt.l }}
+        </button>
+      </div>
     </header>
 
     <div class="flex-1 px-4 py-4 space-y-4">

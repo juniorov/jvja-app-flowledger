@@ -15,6 +15,8 @@ export const useTransactionStore = defineStore('transactions', () => {
   const error = ref(null)
   const currentYear = ref(new Date().getFullYear())
   const currentMonth = ref(new Date().getMonth() + 1)
+  /** Filtro de moneda persistente: 'all' | 'CRC' | 'USD' */
+  const currencyFilter = ref('all')
 
   let _unsubscribe = null
 
@@ -62,7 +64,28 @@ export const useTransactionStore = defineStore('transactions', () => {
     return Array.from(map.entries())
   })
 
+  /**
+   * Igual que groupedByDate pero respetando el filtro de moneda activo.
+   */
+  const filteredGroupedByDate = computed(() => {
+    const source = currencyFilter.value === 'all'
+      ? transactions.value
+      : transactions.value.filter((t) => t.currency === currencyFilter.value)
+    const map = new Map()
+    for (const tx of source) {
+      const key = formatDateGroup(tx.date)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key).push(tx)
+    }
+    return Array.from(map.entries())
+  })
+
   // ── Actions ────────────────────────────────────────────────────────────────
+
+  /** @param {'all' | 'CRC' | 'USD'} value */
+  function setCurrencyFilter(value) {
+    currencyFilter.value = value
+  }
 
   /**
    * Activa la suscripción en tiempo real para un período.
@@ -148,6 +171,7 @@ export const useTransactionStore = defineStore('transactions', () => {
     error,
     currentYear,
     currentMonth,
+    currencyFilter,
     totalIncome,
     totalExpense,
     balance,
@@ -155,8 +179,10 @@ export const useTransactionStore = defineStore('transactions', () => {
     totalFixedCosts,
     netDistributable,
     groupedByDate,
+    filteredGroupedByDate,
     subscribe,
     unsubscribe,
+    setCurrencyFilter,
     addTransaction,
     editTransaction,
     removeTransaction,

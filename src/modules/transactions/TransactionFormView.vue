@@ -17,9 +17,9 @@ const isEdit = computed(() => !!route.params.id)
 const loading = ref(false)
 const loadingTx = ref(false)
 const errorMsg = ref('')
-const originalTx = ref(null) // transacción original (para modo editar)
+const originalTx = ref(null)
 
-// Campos del formulario
+// Campos del formulario — reference y code se pre-llenan para transacciones manuales
 const form = reactive({
   date: new Date().toISOString().split('T')[0],
   description: '',
@@ -27,21 +27,19 @@ const form = reactive({
   type: 'income',
   amount: '',
   currency: workspaceStore.workspace?.baseCurrency ?? 'CRC',
-  code: '',
-  reference: '',
+  code: 'MN',
+  reference: Date.now().toString(),
   balance: '',
   isDistributable: false,
   fixedCosts: '',
 })
 
-// ¿La transacción fue importada? → campos del banco son de solo lectura
 const isImported = computed(() => !!originalTx.value?.importedFrom)
 
-// Solo los campos editables en transacciones importadas
 const editableFields = computed(() =>
   isImported.value
     ? ['description', 'notes', 'isDistributable', 'fixedCosts']
-    : null // null = todo editable
+    : null
 )
 
 function isReadOnly(field) {
@@ -61,7 +59,6 @@ async function loadTransaction() {
     }
     originalTx.value = tx
 
-    // Poblar el formulario
     form.date = dateToInputString(tx.date)
     form.description = tx.description ?? ''
     form.notes = tx.notes ?? ''
@@ -73,7 +70,7 @@ async function loadTransaction() {
     form.balance = tx.balance ?? ''
     form.isDistributable = tx.isDistributable ?? false
     form.fixedCosts = tx.fixedCosts || ''
-  } catch (err) {
+  } catch {
     errorMsg.value = 'No se pudo cargar la transacción.'
   } finally {
     loadingTx.value = false
@@ -113,7 +110,6 @@ async function handleSave() {
       let data
 
       if (isImported.value) {
-        // Solo campos editables para transacciones importadas
         data = {
           description: form.description.trim(),
           notes: form.notes.trim(),
@@ -123,7 +119,6 @@ async function handleSave() {
             : 0,
         }
       } else {
-        // Todos los campos para transacciones manuales
         const isIncome = form.type === 'income'
         const amount = Number(form.amount)
         data = {
@@ -135,7 +130,7 @@ async function handleSave() {
           credit: isIncome ? amount : 0,
           balance: Number(form.balance) || 0,
           currency: form.currency,
-          code: form.code.trim(),
+          code: form.code.trim() || 'MN',
           reference: form.reference.trim(),
           isDistributable: isIncome ? form.isDistributable : false,
           fixedCosts: isIncome && form.isDistributable ? Number(form.fixedCosts) || 0 : 0,
@@ -144,6 +139,9 @@ async function handleSave() {
 
       await store.editTransaction(workspaceStore.workspaceId, route.params.id, data)
     } else {
+      // En creación manual: asegurar que reference y code estén presentes
+      form.code = form.code || 'MN'
+      form.reference = form.reference || Date.now().toString()
       await store.addTransaction(workspaceStore.workspaceId, form, auth.user.uid)
     }
 
@@ -173,24 +171,24 @@ async function handleDelete() {
   <div class="flex flex-col min-h-full">
 
     <!-- Header -->
-    <header class="sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-700 px-4 py-3 flex items-center gap-3">
+    <header class="sticky top-0 z-10 bg-white border-b border-neutral-100 px-4 py-3 flex items-center gap-3">
       <button
         type="button"
-        class="p-2 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
+        class="p-2 rounded-xl text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition min-h-[44px] min-w-[44px] flex items-center justify-center"
         @click="router.push('/movimientos')"
       >
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <polyline points="15 18 9 12 15 6"/>
         </svg>
       </button>
-      <h1 class="flex-1 text-lg font-bold text-gray-900 dark:text-white">
+      <h1 class="flex-1 text-lg font-bold text-neutral-900">
         {{ isEdit ? 'Editar transacción' : 'Nueva transacción' }}
       </h1>
     </header>
 
     <!-- Loading inicial (modo editar) -->
     <div v-if="loadingTx" class="flex-1 flex items-center justify-center py-10">
-      <svg class="w-6 h-6 text-primary-600 animate-spin" viewBox="0 0 24 24" fill="none">
+      <svg class="w-6 h-6 text-primary animate-spin" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
       </svg>
@@ -208,7 +206,7 @@ async function handleDelete() {
       <div
         v-if="errorMsg"
         role="alert"
-        class="flex items-start gap-2 text-sm text-danger-600 dark:text-danger-400 bg-danger-50 dark:bg-danger-500/10 rounded-xl px-3 py-2.5"
+        class="flex items-start gap-2 text-sm text-status-error bg-status-error/10 rounded-xl px-3 py-2.5"
       >
         <svg class="w-4 h-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="10"/>
@@ -218,16 +216,16 @@ async function handleDelete() {
         {{ errorMsg }}
       </div>
 
-      <!-- Tipo: Ingreso / Gasto (solo si no es importado) -->
+      <!-- Tipo: Ingreso / Egreso (solo si no es importado) -->
       <div v-if="!isReadOnly('type')">
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Tipo</label>
+        <label class="block text-sm font-medium text-neutral-700 mb-1.5">Tipo</label>
         <div class="flex gap-2">
           <button
             type="button"
             class="flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition min-h-[48px]"
             :class="form.type === 'income'
-              ? 'border-success-500 bg-success-50 text-success-700 dark:bg-success-500/10 dark:border-success-400 dark:text-success-400'
-              : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'"
+              ? 'border-status-success bg-status-success/10 text-status-success'
+              : 'border-neutral-200 text-neutral-500'"
             @click="form.type = 'income'"
           >
             Ingreso
@@ -236,18 +234,18 @@ async function handleDelete() {
             type="button"
             class="flex-1 py-3 rounded-xl border-2 font-semibold text-sm transition min-h-[48px]"
             :class="form.type === 'expense'
-              ? 'border-danger-500 bg-danger-50 text-danger-700 dark:bg-danger-500/10 dark:border-danger-400 dark:text-danger-400'
-              : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'"
-            @click="form.type = 'expense'"
+              ? 'border-status-error bg-status-error/10 text-status-error'
+              : 'border-neutral-200 text-neutral-500'"
+            @click="form.type = 'expense'; form.isDistributable = false"
           >
-            Gasto
+            Egreso
           </button>
         </div>
       </div>
 
       <!-- Fecha -->
       <div>
-        <label for="tx-date" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label for="tx-date" class="block text-sm font-medium text-neutral-700 mb-1.5">
           Fecha
         </label>
         <input
@@ -256,41 +254,39 @@ async function handleDelete() {
           type="date"
           required
           :disabled="isReadOnly('date') || loading"
-          class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+          class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50 disabled:bg-neutral-50"
         />
       </div>
 
-      <!-- Monto -->
+      <!-- Monto + Moneda -->
       <div v-if="!isReadOnly('amount')">
-        <label for="tx-amount" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label for="tx-amount" class="block text-sm font-medium text-neutral-700 mb-1.5">
           Monto
         </label>
         <div class="flex gap-2">
-          <div class="relative flex-1">
-            <input
-              id="tx-amount"
-              v-model="form.amount"
-              type="number"
-              min="0"
-              step="any"
-              required
-              placeholder="0"
-              :disabled="loading"
-              class="w-full pl-4 pr-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
-            />
-          </div>
-          <!-- Moneda -->
-          <div class="flex rounded-xl border border-gray-200 dark:border-gray-600 overflow-hidden">
+          <input
+            id="tx-amount"
+            v-model="form.amount"
+            type="number"
+            min="0"
+            step="any"
+            required
+            placeholder="0"
+            :disabled="loading"
+            class="flex-1 px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+          />
+          <!-- Selector de moneda -->
+          <div class="flex rounded-xl border border-neutral-200 overflow-hidden">
             <button
               type="button"
               class="px-3 py-3 text-sm font-bold transition min-h-[48px]"
-              :class="form.currency === 'CRC' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300'"
+              :class="form.currency === 'CRC' ? 'bg-primary text-white' : 'bg-white text-neutral-500'"
               @click="form.currency = 'CRC'"
             >₡</button>
             <button
               type="button"
               class="px-3 py-3 text-sm font-bold transition min-h-[48px]"
-              :class="form.currency === 'USD' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300'"
+              :class="form.currency === 'USD' ? 'bg-primary text-white' : 'bg-white text-neutral-500'"
               @click="form.currency = 'USD'"
             >$</button>
           </div>
@@ -299,7 +295,7 @@ async function handleDelete() {
 
       <!-- Descripción -->
       <div>
-        <label for="tx-description" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label for="tx-description" class="block text-sm font-medium text-neutral-700 mb-1.5">
           Descripción
         </label>
         <input
@@ -310,14 +306,14 @@ async function handleDelete() {
           maxlength="200"
           placeholder="¿En qué fue este movimiento?"
           :disabled="loading"
-          class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+          class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
         />
       </div>
 
       <!-- Notas -->
       <div>
-        <label for="tx-notes" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-          Notas <span class="text-gray-400 font-normal">(opcional)</span>
+        <label for="tx-notes" class="block text-sm font-medium text-neutral-700 mb-1.5">
+          Notas <span class="text-neutral-400 font-normal">(opcional)</span>
         </label>
         <textarea
           id="tx-notes"
@@ -326,23 +322,23 @@ async function handleDelete() {
           maxlength="500"
           placeholder="Contexto adicional del movimiento..."
           :disabled="loading"
-          class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+          class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
         />
       </div>
 
       <!-- Distribuible (solo para ingresos) -->
       <div v-if="form.type === 'income'">
-        <div class="flex items-center justify-between bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 px-4 py-3.5">
+        <div class="flex items-center justify-between bg-white rounded-2xl border border-neutral-100 px-4 py-3.5">
           <div>
-            <p class="text-sm font-medium text-gray-900 dark:text-white">Distribuible entre socios</p>
-            <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">¿Este ingreso se reparte según porcentajes?</p>
+            <p class="text-sm font-medium text-neutral-900">Distribuible entre socios</p>
+            <p class="text-xs text-neutral-400 mt-0.5">¿Este ingreso se reparte según porcentajes?</p>
           </div>
           <button
             type="button"
             role="switch"
             :aria-checked="form.isDistributable"
             class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition cursor-pointer"
-            :class="form.isDistributable ? 'bg-primary-600' : 'bg-gray-200 dark:bg-gray-600'"
+            :class="form.isDistributable ? 'bg-primary' : 'bg-neutral-200'"
             :disabled="loading"
             @click="form.isDistributable = !form.isDistributable"
           >
@@ -355,8 +351,8 @@ async function handleDelete() {
 
         <!-- Costos fijos (solo si es distribuible) -->
         <div v-if="form.isDistributable" class="mt-3">
-          <label for="tx-fixed-costs" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-            Costos fijos a descontar <span class="text-gray-400 font-normal">(opcional)</span>
+          <label for="tx-fixed-costs" class="block text-sm font-medium text-neutral-700 mb-1.5">
+            Costos fijos a descontar <span class="text-neutral-400 font-normal">(opcional)</span>
           </label>
           <input
             id="tx-fixed-costs"
@@ -366,15 +362,15 @@ async function handleDelete() {
             step="any"
             placeholder="0"
             :disabled="loading"
-            class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+            class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
           />
         </div>
       </div>
 
-      <!-- Campos opcionales (solo transacciones manuales) -->
+      <!-- Campos adicionales (solo transacciones manuales) -->
       <template v-if="!isImported">
         <details class="group">
-          <summary class="cursor-pointer text-sm text-primary-600 dark:text-primary-400 font-medium list-none flex items-center gap-1 py-1">
+          <summary class="cursor-pointer text-sm text-primary font-medium list-none flex items-center gap-1 py-1">
             <svg class="w-4 h-4 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
@@ -384,35 +380,35 @@ async function handleDelete() {
           <div class="space-y-3 mt-3">
             <!-- Código -->
             <div>
-              <label for="tx-code" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Código</label>
+              <label for="tx-code" class="block text-sm font-medium text-neutral-700 mb-1.5">Código</label>
               <input
                 id="tx-code"
                 v-model="form.code"
                 type="text"
                 maxlength="20"
-                placeholder="TF, CP, MD..."
+                placeholder="MN"
                 :disabled="loading"
-                class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+                class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
               />
             </div>
 
             <!-- Referencia -->
             <div>
-              <label for="tx-reference" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Referencia</label>
+              <label for="tx-reference" class="block text-sm font-medium text-neutral-700 mb-1.5">Referencia</label>
               <input
                 id="tx-reference"
                 v-model="form.reference"
                 type="text"
                 maxlength="50"
-                placeholder="Número de referencia bancaria"
+                placeholder="Número de referencia"
                 :disabled="loading"
-                class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+                class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
               />
             </div>
 
             <!-- Saldo -->
             <div>
-              <label for="tx-balance" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Saldo posterior</label>
+              <label for="tx-balance" class="block text-sm font-medium text-neutral-700 mb-1.5">Saldo posterior</label>
               <input
                 id="tx-balance"
                 v-model="form.balance"
@@ -420,7 +416,7 @@ async function handleDelete() {
                 step="any"
                 placeholder="Saldo de la cuenta después del movimiento"
                 :disabled="loading"
-                class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition disabled:opacity-50"
+                class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
               />
             </div>
           </div>
@@ -432,7 +428,7 @@ async function handleDelete() {
         <button
           type="submit"
           :disabled="loading"
-          class="w-full py-3 px-4 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold text-base min-h-[48px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="w-full py-3 px-4 rounded-xl bg-primary hover:bg-primary-c text-white font-semibold text-base min-h-[48px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span v-if="loading" class="flex items-center justify-center gap-2">
             <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -449,7 +445,7 @@ async function handleDelete() {
           v-if="isEdit && !isImported"
           type="button"
           :disabled="loading"
-          class="w-full py-3 px-4 rounded-xl bg-danger-50 dark:bg-danger-500/10 text-danger-600 dark:text-danger-400 font-semibold text-sm min-h-[48px] transition hover:bg-danger-100 dark:hover:bg-danger-500/20 disabled:opacity-50"
+          class="w-full py-3 px-4 rounded-xl bg-status-error/10 text-status-error font-semibold text-sm min-h-[48px] transition hover:bg-status-error/20 disabled:opacity-50"
           @click="handleDelete"
         >
           Eliminar transacción
