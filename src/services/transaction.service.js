@@ -98,6 +98,9 @@ export async function createTransaction(workspaceId, formData, uid) {
   const isIncome = formData.type === 'income'
   const amount = Number(formData.amount) || 0
 
+  const distributable = isIncome && !!formData.isDistributable
+  const hasTax = distributable && !!formData.hasTax
+  const credit = isIncome ? amount : 0
   const tx = {
     date: Timestamp.fromDate(dateStringToDate(formData.date)),
     reference: formData.reference?.trim() || '',
@@ -105,12 +108,14 @@ export async function createTransaction(workspaceId, formData, uid) {
     description: formData.description.trim(),
     notes: formData.notes?.trim() || '',
     debit: isIncome ? 0 : amount,
-    credit: isIncome ? amount : 0,
+    credit,
     balance: Number(formData.balance) || 0,
     currency: formData.currency || 'CRC',
     type: formData.type,
-    isDistributable: isIncome ? !!formData.isDistributable : false,
-    fixedCosts: isIncome && formData.isDistributable ? Number(formData.fixedCosts) || 0 : 0,
+    isDistributable: distributable,
+    hasTax,
+    taxAmount: hasTax ? credit * 0.13 : 0,
+    fixedCosts: distributable ? Number(formData.fixedCosts) || 0 : 0,
     importedFrom: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -235,6 +240,8 @@ export async function saveBatchTransactions(workspaceId, rows, uid) {
     for (const row of chunk) {
       const ref = doc(col)
       const isIncome = row.type === 'income'
+      const distributable = isIncome && !!row.isDistributable
+      const hasTax = distributable && !!row.hasTax
       batch.set(ref, {
         date: Timestamp.fromDate(row.date),
         reference: row.reference,
@@ -246,8 +253,10 @@ export async function saveBatchTransactions(workspaceId, rows, uid) {
         balance: row.balance,
         currency: row.currency || 'CRC',
         type: row.type,
-        isDistributable: isIncome ? !!row.isDistributable : false,
-        fixedCosts: isIncome && row.isDistributable ? Number(row.fixedCosts) || 0 : 0,
+        isDistributable: distributable,
+        hasTax,
+        taxAmount: hasTax ? (row.credit || 0) * 0.13 : 0,
+        fixedCosts: distributable ? Number(row.fixedCosts) || 0 : 0,
         importedFrom: row.importedFrom || null,
         createdAt: now,
         updatedAt: now,

@@ -56,6 +56,25 @@ function editTransaction(tx) {
   closeDetail()
   router.push(`/movimientos/${tx.id}/editar`)
 }
+
+// ── Desglose de distribución para el detalle ──────────────────────────────────
+function txBreakdown(tx) {
+  if (!tx || !tx.isDistributable || tx.type !== 'income') return null
+  const gross = tx.credit || 0
+  if (gross <= 0) return null
+  const tax = tx.hasTax ? (tx.taxAmount ?? gross * 0.13) : 0
+  const costs = tx.fixedCosts || 0
+  const net = gross - tax - costs
+  const partners = workspaceStore.workspace?.partners ?? []
+  const distribution = partners.map((p) => ({
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    percentage: p.percentage,
+    amount: net > 0 ? (net * p.percentage) / 100 : 0,
+  }))
+  return { gross, tax, costs, net, distribution, currency: tx.currency }
+}
 </script>
 
 <template>
@@ -238,14 +257,75 @@ function editTransaction(tx) {
               <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Código</dt>
               <dd class="text-sm text-neutral-800">{{ selectedTx.code }}</dd>
             </div>
-            <div v-if="selectedTx.type === 'income'" class="flex flex-col gap-0.5">
+            <div v-if="selectedTx.type === 'income'" class="flex flex-col gap-1.5">
               <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Distribuible</dt>
-              <dd class="text-sm">
-                <span v-if="selectedTx.isDistributable" class="text-primary font-medium">
-                  Sí {{ selectedTx.fixedCosts ? `· Costos fijos: ${formatAmount(selectedTx.fixedCosts, selectedTx.currency)}` : '' }}
-                </span>
-                <span v-else class="text-neutral-400">No</span>
+              <!-- Sin distribución -->
+              <dd v-if="!selectedTx.isDistributable" class="text-sm text-neutral-400">No</dd>
+              <!-- Con distribución: desglose completo -->
+              <dd v-else-if="txBreakdown(selectedTx)">
+                <div class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden mt-1">
+                  <div class="space-y-0 divide-y divide-neutral-100">
+                    <!-- Ingreso bruto -->
+                    <div class="flex justify-between items-center px-3 py-2.5">
+                      <span class="text-xs text-neutral-500">Ingreso bruto</span>
+                      <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                        {{ formatAmount(txBreakdown(selectedTx).gross, txBreakdown(selectedTx).currency) }}
+                      </span>
+                    </div>
+                    <!-- Impuesto -->
+                    <div v-if="txBreakdown(selectedTx).tax > 0" class="flex justify-between items-center px-3 py-2.5">
+                      <span class="text-xs text-neutral-500">Impuesto (13%)</span>
+                      <span class="text-xs font-semibold text-status-error tabular-nums">
+                        − {{ formatAmount(txBreakdown(selectedTx).tax, txBreakdown(selectedTx).currency) }}
+                      </span>
+                    </div>
+                    <!-- Costos fijos -->
+                    <div v-if="txBreakdown(selectedTx).costs > 0" class="flex justify-between items-center px-3 py-2.5">
+                      <span class="text-xs text-neutral-500">Costos fijos</span>
+                      <span class="text-xs font-semibold text-status-error tabular-nums">
+                        − {{ formatAmount(txBreakdown(selectedTx).costs, txBreakdown(selectedTx).currency) }}
+                      </span>
+                    </div>
+                    <!-- Neto -->
+                    <div class="flex justify-between items-center px-3 py-2.5 bg-white">
+                      <span class="text-xs font-semibold text-neutral-700">Neto a distribuir</span>
+                      <span class="text-sm font-bold text-primary tabular-nums">
+                        {{ formatAmount(txBreakdown(selectedTx).net > 0 ? txBreakdown(selectedTx).net : 0, txBreakdown(selectedTx).currency) }}
+                      </span>
+                    </div>
+                    <!-- Por participante -->
+                    <div
+                      v-for="p in txBreakdown(selectedTx).distribution"
+                      :key="p.id"
+                      class="flex justify-between items-center px-3 py-2"
+                    >
+                      <div class="flex items-center gap-1.5">
+                        <div
+                          class="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+                          :class="p.type === 'company' ? 'bg-primary/10' : 'bg-secondary-purple/10'"
+                        >
+                          <span
+                            class="text-[9px] font-bold"
+                            :class="p.type === 'company' ? 'text-primary' : 'text-secondary-purple'"
+                          >
+                            {{ (p.name || '?')[0].toUpperCase() }}
+                          </span>
+                        </div>
+                        <span class="text-xs text-neutral-600">{{ p.name }}</span>
+                        <span class="text-[10px] text-neutral-400">{{ p.percentage }}%</span>
+                      </div>
+                      <span
+                        class="text-xs font-bold tabular-nums"
+                        :class="p.type === 'company' ? 'text-primary' : 'text-neutral-900'"
+                      >
+                        {{ formatAmount(p.amount > 0 ? p.amount : 0, txBreakdown(selectedTx).currency) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </dd>
+              <!-- Marcado distribuible pero sin crédito calculable -->
+              <dd v-else class="text-sm text-primary font-medium">Sí</dd>
             </div>
             <div v-if="selectedTx.importedFrom" class="flex flex-col gap-0.5">
               <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Importado de</dt>

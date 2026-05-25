@@ -42,13 +42,21 @@ export const useTransactionStore = defineStore('transactions', () => {
       .reduce((sum, t) => sum + (t.credit || 0), 0)
   )
 
+  const totalTax = computed(() =>
+    transactions.value
+      .filter((t) => t.isDistributable && t.hasTax)
+      .reduce((sum, t) => sum + (t.taxAmount || (t.credit || 0) * 0.13), 0)
+  )
+
   const totalFixedCosts = computed(() =>
     transactions.value
       .filter((t) => t.isDistributable)
       .reduce((sum, t) => sum + (t.fixedCosts || 0), 0)
   )
 
-  const netDistributable = computed(() => distributableIncome.value - totalFixedCosts.value)
+  const netDistributable = computed(
+    () => distributableIncome.value - totalTax.value - totalFixedCosts.value
+  )
 
   /**
    * Transacciones agrupadas por fecha para renderizar en lista.
@@ -176,6 +184,7 @@ export const useTransactionStore = defineStore('transactions', () => {
     totalExpense,
     balance,
     distributableIncome,
+    totalTax,
     totalFixedCosts,
     netDistributable,
     groupedByDate,
