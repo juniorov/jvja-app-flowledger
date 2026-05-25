@@ -452,6 +452,12 @@ onUnmounted(() => {
                       {{ formatAmount(c.distributableIncome, c.currency) }}
                     </span>
                   </div>
+                  <div v-if="c.totalTax > 0" class="flex items-center justify-between">
+                    <span class="text-[10px] text-neutral-400">− Impuesto (13%)</span>
+                    <span class="text-[10px] font-medium text-status-error tabular-nums">
+                      − {{ formatAmount(c.totalTax, c.currency) }}
+                    </span>
+                  </div>
                   <div v-if="c.totalFixedCosts > 0" class="flex items-center justify-between">
                     <span class="text-[10px] text-neutral-400">− Costos fijos</span>
                     <span class="text-[10px] font-medium text-status-error tabular-nums">

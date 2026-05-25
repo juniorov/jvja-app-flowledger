@@ -113,6 +113,7 @@ export function parseRawRows(rawRows, sourceFile = '', currency = 'CRC') {
       notes: '',
       isDistributable: false,
       fixedCosts: 0,
+      hasTax: false,
       // Estado
       isDuplicate: false,
       includeInImport: true,

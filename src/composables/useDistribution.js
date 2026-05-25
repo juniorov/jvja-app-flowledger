@@ -21,11 +21,12 @@ export function validatePartners(partners) {
  * {
  *   CRC: {
  *     distributableIncome: number,
+ *     totalTax: number,
  *     totalFixedCosts: number,
  *     netDistributable: number,
  *     participants: Array<{
  *       id, name, type, percentage, amount,
- *       transactions: Array<{ id, date, description, notes, credit, fixedCosts, contribution }>
+ *       transactions: Array<{ id, date, description, notes, credit, taxAmount, fixedCosts, contribution }>
  *     }>
  *   },
  *   USD?: { ... }
@@ -59,19 +60,26 @@ export function computeDistribution(transactions, partners) {
 
   for (const [currency, txs] of Object.entries(byCurrency)) {
     const distributableIncome = txs.reduce((sum, tx) => sum + (tx.credit || 0), 0)
+    const totalTax = txs.reduce((sum, tx) => {
+      const credit = tx.credit || 0
+      return sum + (tx.hasTax ? credit * 0.13 : 0)
+    }, 0)
     const totalFixedCosts = txs.reduce((sum, tx) => sum + (tx.fixedCosts || 0), 0)
-    const netDistributable = distributableIncome - totalFixedCosts
+    const netDistributable = distributableIncome - totalTax - totalFixedCosts
 
     const participants = partners.map((partner) => {
       const amount = (netDistributable * partner.percentage) / 100
       const txDetails = txs.map((tx) => {
-        const txNet = (tx.credit || 0) - (tx.fixedCosts || 0)
+        const credit = tx.credit || 0
+        const taxAmount = tx.hasTax ? credit * 0.13 : 0
+        const txNet = credit - taxAmount - (tx.fixedCosts || 0)
         return {
           id: tx.id ?? tx._key ?? '',
           date: tx.date,
           description: tx.description || '',
           notes: tx.notes || '',
-          credit: tx.credit || 0,
+          credit,
+          taxAmount,
           fixedCosts: tx.fixedCosts || 0,
           contribution: (txNet * partner.percentage) / 100,
         }
@@ -89,6 +97,7 @@ export function computeDistribution(transactions, partners) {
 
     result[currency] = {
       distributableIncome,
+      totalTax,
       totalFixedCosts,
       netDistributable,
       participants,

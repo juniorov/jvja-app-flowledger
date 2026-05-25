@@ -96,6 +96,28 @@ async function fetchAndMarkDuplicates() {
 const rowsToImport = computed(() => rows.value.filter((r) => r.includeInImport))
 const duplicateCount = computed(() => rows.value.filter((r) => r.isDuplicate).length)
 
+/**
+ * Calcula el desglose de distribución para una fila del preview.
+ * @param {object} row
+ * @returns {{ gross, tax, costs, net, distribution, currency } | null}
+ */
+function rowBreakdown(row) {
+  if (!row.isDistributable || row.type !== 'income') return null
+  const gross = row.credit || 0
+  if (gross <= 0) return null
+  const tax = row.hasTax ? gross * 0.13 : 0
+  const costs = Number(row.fixedCosts) || 0
+  const net = gross - tax - costs
+  const partners = workspaceStore.workspace?.partners ?? []
+  const distribution = partners.map((p) => ({
+    id: p.id,
+    name: p.name,
+    percentage: p.percentage,
+    amount: net > 0 ? (net * p.percentage) / 100 : 0,
+  }))
+  return { gross, tax, costs, net, distribution, currency: previewCurrency.value }
+}
+
 async function handleSave() {
   if (rowsToImport.value.length === 0) return
   saving.value = true
@@ -383,37 +405,94 @@ function rowAmount(row) {
               />
             </div>
 
-            <!-- Distribuible + costos fijos (solo si es ingreso) -->
-            <div v-if="row.type === 'income'" class="flex items-center gap-3">
-              <!-- Toggle distribuible -->
-              <button
-                type="button"
-                class="flex items-center gap-2 min-h-[36px] flex-1"
-                @click="row.isDistributable = !row.isDistributable"
-              >
-                <div
-                  class="w-9 h-5 rounded-full transition-colors shrink-0"
-                  :class="row.isDistributable ? 'bg-primary' : 'bg-neutral-200'"
+            <!-- Distribuible + opciones (solo si es ingreso) -->
+            <div v-if="row.type === 'income'" class="space-y-2">
+              <!-- Fila de toggles -->
+              <div class="flex items-center gap-3">
+                <!-- Toggle distribuible -->
+                <button
+                  type="button"
+                  class="flex items-center gap-2 min-h-[36px] flex-1"
+                  @click="row.isDistributable = !row.isDistributable"
                 >
                   <div
-                    class="w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform"
-                    :class="row.isDistributable ? 'translate-x-4 ml-0.5' : 'translate-x-0.5'"
+                    class="w-9 h-5 rounded-full transition-colors shrink-0"
+                    :class="row.isDistributable ? 'bg-primary' : 'bg-neutral-200'"
+                  >
+                    <div
+                      class="w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform"
+                      :class="row.isDistributable ? 'translate-x-4 ml-0.5' : 'translate-x-0.5'"
+                    />
+                  </div>
+                  <span class="text-xs font-medium text-neutral-700">Distribuible</span>
+                </button>
+
+                <!-- Toggle impuesto (solo si es distribuible) -->
+                <button
+                  v-if="row.isDistributable"
+                  type="button"
+                  class="flex items-center gap-1.5 min-h-[36px]"
+                  @click="row.hasTax = !row.hasTax"
+                >
+                  <div
+                    class="w-9 h-5 rounded-full transition-colors shrink-0"
+                    :class="row.hasTax ? 'bg-status-warning' : 'bg-neutral-200'"
+                  >
+                    <div
+                      class="w-4 h-4 rounded-full bg-white shadow-sm mt-0.5 transition-transform"
+                      :class="row.hasTax ? 'translate-x-4 ml-0.5' : 'translate-x-0.5'"
+                    />
+                  </div>
+                  <span class="text-xs font-medium text-neutral-700">13%</span>
+                </button>
+
+                <!-- Costos fijos (solo si es distribuible) -->
+                <div v-if="row.isDistributable" class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide shrink-0">Costos</span>
+                  <input
+                    v-model.number="row.fixedCosts"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                    class="w-20 px-2 py-1.5 rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-900 text-xs text-right min-h-[36px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition tabular-nums"
                   />
                 </div>
-                <span class="text-xs font-medium text-neutral-700">Distribuible</span>
-              </button>
+              </div>
 
-              <!-- Costos fijos (solo si es distribuible) -->
-              <div v-if="row.isDistributable" class="flex items-center gap-1.5">
-                <span class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide shrink-0">Costos</span>
-                <input
-                  v-model.number="row.fixedCosts"
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  class="w-24 px-2 py-1.5 rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-900 text-xs text-right min-h-[36px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition tabular-nums"
-                />
+              <!-- Desglose por socio (solo si es distribuible y hay monto) -->
+              <div
+                v-if="rowBreakdown(row)"
+                class="rounded-xl border border-neutral-100 bg-neutral-50 divide-y divide-neutral-100 overflow-hidden"
+              >
+                <div v-if="rowBreakdown(row).tax > 0" class="flex justify-between items-center px-3 py-1.5">
+                  <span class="text-[10px] text-neutral-400">Impuesto 13%</span>
+                  <span class="text-[10px] font-semibold text-status-error tabular-nums">
+                    − {{ formatAmount(rowBreakdown(row).tax, rowBreakdown(row).currency) }}
+                  </span>
+                </div>
+                <div v-if="rowBreakdown(row).costs > 0" class="flex justify-between items-center px-3 py-1.5">
+                  <span class="text-[10px] text-neutral-400">Costos fijos</span>
+                  <span class="text-[10px] font-semibold text-status-error tabular-nums">
+                    − {{ formatAmount(rowBreakdown(row).costs, rowBreakdown(row).currency) }}
+                  </span>
+                </div>
+                <div class="flex justify-between items-center px-3 py-1.5 bg-white">
+                  <span class="text-[10px] font-semibold text-neutral-600">Neto a distribuir</span>
+                  <span class="text-[10px] font-bold text-primary tabular-nums">
+                    {{ formatAmount(rowBreakdown(row).net > 0 ? rowBreakdown(row).net : 0, rowBreakdown(row).currency) }}
+                  </span>
+                </div>
+                <div
+                  v-for="p in rowBreakdown(row).distribution"
+                  :key="p.id"
+                  class="flex justify-between items-center px-3 py-1"
+                >
+                  <span class="text-[10px] text-neutral-400">{{ p.name }} ({{ p.percentage }}%)</span>
+                  <span class="text-[10px] font-semibold text-neutral-700 tabular-nums">
+                    {{ formatAmount(p.amount > 0 ? p.amount : 0, rowBreakdown(row).currency) }}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

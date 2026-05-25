@@ -47,6 +47,7 @@ export function calculateDistribution(netDistributable, partners) {
  *     totalExpense: number,
  *     balance: number,
  *     distributableIncome: number,
+ *     totalTax: number,
  *     totalFixedCosts: number,
  *     netDistributable: number,
  *     distribution: Array<{ id, name, type, percentage, amount }>
@@ -79,6 +80,7 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
         totalIncome: 0,
         totalExpense: 0,
         distributableIncome: 0,
+        totalTax: 0,
         totalFixedCosts: 0,
       }
     }
@@ -88,7 +90,9 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
     c.totalExpense += tx.debit || 0
 
     if (tx.isDistributable && tx.type === 'income') {
-      c.distributableIncome += tx.credit || 0
+      const credit = tx.credit || 0
+      c.distributableIncome += credit
+      c.totalTax += tx.hasTax ? (tx.taxAmount ?? credit * 0.13) : 0
       c.totalFixedCosts += tx.fixedCosts || 0
     }
   }
@@ -104,7 +108,7 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
       const c = period.byCurrency[currency]
       if (!c) continue
 
-      const netDistributable = c.distributableIncome - c.totalFixedCosts
+      const netDistributable = c.distributableIncome - c.totalTax - c.totalFixedCosts
 
       currencies.push({
         currency,
@@ -112,6 +116,7 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
         totalExpense: c.totalExpense,
         balance: c.totalIncome - c.totalExpense,
         distributableIncome: c.distributableIncome,
+        totalTax: c.totalTax,
         totalFixedCosts: c.totalFixedCosts,
         netDistributable,
         distribution: calculateDistribution(netDistributable, partners),

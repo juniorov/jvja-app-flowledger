@@ -5,7 +5,7 @@ import { Timestamp } from 'firebase/firestore'
 import { useTransactionStore } from '@/stores/useTransactionStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useAuthStore } from '@/stores/useAuthStore'
-import { dateToInputString, dateStringToDate } from '@/shared/utils/formatters'
+import { formatAmount, dateToInputString, dateStringToDate } from '@/shared/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,13 +32,36 @@ const form = reactive({
   balance: '',
   isDistributable: false,
   fixedCosts: '',
+  hasTax: false,
 })
 
 const isImported = computed(() => !!originalTx.value?.importedFrom)
 
+// Desglose de distribución en tiempo real
+const breakdown = computed(() => {
+  if (form.type !== 'income' || !form.isDistributable) return null
+  // En modo editar importado, el monto viene del original
+  const gross = isEdit.value && isImported.value
+    ? (originalTx.value?.credit || 0)
+    : (Number(form.amount) || 0)
+  if (gross <= 0) return null
+
+  const tax = form.hasTax ? gross * 0.13 : 0
+  const costs = Number(form.fixedCosts) || 0
+  const net = gross - tax - costs
+  const partners = workspaceStore.workspace?.partners ?? []
+  const distribution = partners.map((p) => ({
+    id: p.id,
+    name: p.name,
+    percentage: p.percentage,
+    amount: net > 0 ? (net * p.percentage) / 100 : 0,
+  }))
+  return { gross, tax, costs, net, distribution, currency: form.currency }
+})
+
 const editableFields = computed(() =>
   isImported.value
-    ? ['description', 'notes', 'isDistributable', 'fixedCosts']
+    ? ['description', 'notes', 'isDistributable', 'fixedCosts', 'hasTax']
     : null
 )
 
@@ -70,6 +93,7 @@ async function loadTransaction() {
     form.balance = tx.balance ?? ''
     form.isDistributable = tx.isDistributable ?? false
     form.fixedCosts = tx.fixedCosts || ''
+    form.hasTax = tx.hasTax ?? false
   } catch {
     errorMsg.value = 'No se pudo cargar la transacción.'
   } finally {
@@ -110,13 +134,15 @@ async function handleSave() {
       let data
 
       if (isImported.value) {
+        const distributable = form.type === 'income' && form.isDistributable
+        const hasTax = distributable && form.hasTax
         data = {
           description: form.description.trim(),
           notes: form.notes.trim(),
-          isDistributable: form.type === 'income' ? form.isDistributable : false,
-          fixedCosts: form.type === 'income' && form.isDistributable
-            ? Number(form.fixedCosts) || 0
-            : 0,
+          isDistributable: distributable,
+          hasTax,
+          taxAmount: hasTax ? (originalTx.value?.credit || 0) * 0.13 : 0,
+          fixedCosts: distributable ? Number(form.fixedCosts) || 0 : 0,
         }
       } else {
         const isIncome = form.type === 'income'
@@ -133,6 +159,8 @@ async function handleSave() {
           code: form.code.trim() || 'MN',
           reference: form.reference.trim(),
           isDistributable: isIncome ? form.isDistributable : false,
+          hasTax: isIncome && form.isDistributable ? form.hasTax : false,
+          taxAmount: isIncome && form.isDistributable && form.hasTax ? amount * 0.13 : 0,
           fixedCosts: isIncome && form.isDistributable ? Number(form.fixedCosts) || 0 : 0,
         }
       }
@@ -349,21 +377,94 @@ async function handleDelete() {
           </button>
         </div>
 
-        <!-- Costos fijos (solo si es distribuible) -->
-        <div v-if="form.isDistributable" class="mt-3">
-          <label for="tx-fixed-costs" class="block text-sm font-medium text-neutral-700 mb-1.5">
-            Costos fijos a descontar <span class="text-neutral-400 font-normal">(opcional)</span>
-          </label>
-          <input
-            id="tx-fixed-costs"
-            v-model="form.fixedCosts"
-            type="number"
-            min="0"
-            step="any"
-            placeholder="0"
-            :disabled="loading"
-            class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
-          />
+        <!-- Opciones adicionales (solo si es distribuible) -->
+        <div v-if="form.isDistributable" class="mt-3 space-y-3">
+          <!-- Toggle impuesto 13% -->
+          <div class="flex items-center justify-between bg-white rounded-2xl border border-neutral-100 px-4 py-3.5">
+            <div>
+              <p class="text-sm font-medium text-neutral-900">Cobrar impuesto (13%)</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Se descuenta sobre el monto total</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="form.hasTax"
+              class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition cursor-pointer"
+              :class="form.hasTax ? 'bg-status-warning' : 'bg-neutral-200'"
+              :disabled="loading"
+              @click="form.hasTax = !form.hasTax"
+            >
+              <span
+                class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition"
+                :class="form.hasTax ? 'translate-x-5' : 'translate-x-0'"
+              />
+            </button>
+          </div>
+
+          <!-- Costos fijos -->
+          <div>
+            <label for="tx-fixed-costs" class="block text-sm font-medium text-neutral-700 mb-1.5">
+              Costos fijos a descontar <span class="text-neutral-400 font-normal">(opcional)</span>
+            </label>
+            <input
+              id="tx-fixed-costs"
+              v-model="form.fixedCosts"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0"
+              :disabled="loading"
+              class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+            />
+          </div>
+
+          <!-- Desglose en tiempo real -->
+          <div v-if="breakdown" class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden">
+            <p class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide px-4 pt-3 pb-2">
+              Desglose de distribución
+            </p>
+            <div class="space-y-0 divide-y divide-neutral-100">
+              <!-- Ingreso bruto -->
+              <div class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Ingreso bruto</span>
+                <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                  {{ formatAmount(breakdown.gross, breakdown.currency) }}
+                </span>
+              </div>
+              <!-- Impuesto -->
+              <div v-if="breakdown.tax > 0" class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Impuesto (13%)</span>
+                <span class="text-xs font-semibold text-status-error tabular-nums">
+                  − {{ formatAmount(breakdown.tax, breakdown.currency) }}
+                </span>
+              </div>
+              <!-- Costos fijos -->
+              <div v-if="breakdown.costs > 0" class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Costos fijos</span>
+                <span class="text-xs font-semibold text-status-error tabular-nums">
+                  − {{ formatAmount(breakdown.costs, breakdown.currency) }}
+                </span>
+              </div>
+              <!-- Neto a distribuir -->
+              <div class="flex justify-between items-center px-4 py-2.5 bg-white">
+                <span class="text-xs font-semibold text-neutral-700">Neto a distribuir</span>
+                <span class="text-sm font-bold text-primary tabular-nums">
+                  {{ formatAmount(breakdown.net > 0 ? breakdown.net : 0, breakdown.currency) }}
+                </span>
+              </div>
+              <!-- Por socio/empresa -->
+              <div
+                v-for="p in breakdown.distribution"
+                :key="p.id"
+                class="flex justify-between items-center px-4 py-2"
+              >
+                <span class="text-xs text-neutral-500">{{ p.name }} ({{ p.percentage }}%)</span>
+                <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                  {{ formatAmount(p.amount > 0 ? p.amount : 0, breakdown.currency) }}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
