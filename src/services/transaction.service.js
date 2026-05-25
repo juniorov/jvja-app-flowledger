@@ -4,6 +4,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  setDoc,
   getDoc,
   query,
   where,
@@ -169,6 +170,58 @@ export async function deleteTransaction(workspaceId, txId) {
  * @param {string} uid  UID del usuario que importa
  * @returns {Promise<number>}  cantidad de transacciones guardadas
  */
+/**
+ * ID de documento fijo para el saldo inicial por moneda.
+ * Permite upsert directo sin queries adicionales.
+ * @param {'CRC'|'USD'} currency
+ */
+function openingBalanceDocId(currency) {
+  return `opening-balance-${currency.toLowerCase()}`
+}
+
+/**
+ * Lee el saldo inicial de apertura para una moneda.
+ * Devuelve null si no existe.
+ *
+ * @param {string} workspaceId
+ * @param {'CRC'|'USD'} currency
+ * @returns {Promise<object|null>}
+ */
+export async function getOpeningBalance(workspaceId, currency) {
+  const snap = await getDoc(doc(txCollection(workspaceId), openingBalanceDocId(currency)))
+  if (!snap.exists()) return null
+  return { id: snap.id, ...snap.data() }
+}
+
+/**
+ * Crea o reemplaza el saldo inicial de apertura para una moneda.
+ * Usa un ID de documento fijo para garantizar que solo exista uno por moneda.
+ *
+ * @param {string} workspaceId
+ * @param {{ amount: number, date: string, currency: 'CRC'|'USD' }} data
+ * @param {string} uid
+ */
+export async function upsertOpeningBalance(workspaceId, { amount, date, currency }, uid) {
+  const ref = doc(txCollection(workspaceId), openingBalanceDocId(currency))
+  await setDoc(ref, {
+    date: Timestamp.fromDate(dateStringToDate(date)),
+    reference: '',
+    code: 'SI',
+    description: `Saldo inicial ${currency}`,
+    notes: 'Saldo inicial de apertura',
+    debit: 0,
+    credit: Number(amount) || 0,
+    balance: Number(amount) || 0,
+    currency,
+    type: 'income',
+    isDistributable: false,
+    fixedCosts: 0,
+    importedFrom: null,
+    updatedAt: serverTimestamp(),
+    createdBy: uid,
+  })
+}
+
 export async function saveBatchTransactions(workspaceId, rows, uid) {
   const BATCH_LIMIT = 499
   const col = txCollection(workspaceId)

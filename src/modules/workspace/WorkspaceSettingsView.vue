@@ -1,10 +1,12 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { updateWorkspace } from '@/services/workspace.service'
 import { createInvitation } from '@/services/invitation.service'
+import { getOpeningBalance, upsertOpeningBalance } from '@/services/transaction.service'
+import { dateToInputString } from '@/shared/utils/formatters'
 import PartnersEditor from '@/shared/components/PartnersEditor.vue'
 
 const auth = useAuthStore()
@@ -198,6 +200,75 @@ async function copyLink() {
     // fallback: seleccionar el texto
   }
 }
+
+// ── Saldo inicial ─────────────────────────────────────────────────────────────
+
+const obForm = ref({
+  CRC: { amount: '', date: '' },
+  USD: { amount: '', date: '' },
+})
+const obLoading = ref(false)
+const obSaving = ref({ CRC: false, USD: false })
+const obError = ref({ CRC: '', USD: '' })
+const obSaved = ref({ CRC: false, USD: false })
+
+async function loadOpeningBalances() {
+  if (!workspaceStore.workspaceId) return
+  obLoading.value = true
+  try {
+    const [crc, usd] = await Promise.all([
+      getOpeningBalance(workspaceStore.workspaceId, 'CRC'),
+      getOpeningBalance(workspaceStore.workspaceId, 'USD'),
+    ])
+    if (crc) {
+      obForm.value.CRC.amount = String(crc.credit)
+      obForm.value.CRC.date = dateToInputString(crc.date)
+    }
+    if (usd) {
+      obForm.value.USD.amount = String(usd.credit)
+      obForm.value.USD.date = dateToInputString(usd.date)
+    }
+  } catch (err) {
+    console.error('[WorkspaceSettings] loadOpeningBalances:', err)
+  } finally {
+    obLoading.value = false
+  }
+}
+
+async function saveOpeningBalance(currency) {
+  const form = obForm.value[currency]
+  obError.value[currency] = ''
+
+  const amount = Number(form.amount)
+  if (!form.date) {
+    obError.value[currency] = 'Ingresá una fecha de corte.'
+    return
+  }
+  if (isNaN(amount) || amount < 0) {
+    obError.value[currency] = 'El monto debe ser mayor o igual a 0.'
+    return
+  }
+
+  obSaving.value[currency] = true
+  try {
+    await upsertOpeningBalance(
+      workspaceStore.workspaceId,
+      { amount, date: form.date, currency },
+      auth.user.uid
+    )
+    obSaved.value[currency] = true
+    setTimeout(() => { obSaved.value[currency] = false }, 3000)
+  } catch (err) {
+    obError.value[currency] = 'No se pudo guardar. Intentá de nuevo.'
+    console.error('[WorkspaceSettings] saveOpeningBalance:', err)
+  } finally {
+    obSaving.value[currency] = false
+  }
+}
+
+onMounted(() => {
+  if (workspaceStore.currentUserIsAdmin) loadOpeningBalances()
+})
 
 async function handleLogout() {
   workspaceStore.clearWorkspace()
@@ -532,6 +603,115 @@ async function handleLogout() {
           </span>
           <span v-else>Guardar participantes</span>
         </button>
+      </div>
+
+      <!-- ── Saldo inicial ──────────────────────────────────────────── -->
+      <div v-if="workspaceStore.currentUserIsAdmin" class="space-y-4">
+        <div>
+          <p class="text-base font-bold text-neutral-900">Saldo inicial</p>
+          <p class="text-xs text-neutral-400 mt-0.5">
+            Saldo que existía antes del primer movimiento importado. Se registra como transacción de apertura y se incluye en el balance global.
+          </p>
+        </div>
+
+        <!-- Skeleton de carga -->
+        <div v-if="obLoading" class="space-y-3">
+          <div class="h-28 rounded-xl bg-neutral-100 animate-pulse" />
+          <div class="h-28 rounded-xl bg-neutral-100 animate-pulse" />
+        </div>
+
+        <!-- Formulario por moneda -->
+        <template v-else>
+          <div
+            v-for="currency in ['CRC', 'USD']"
+            :key="currency"
+            class="bg-white rounded-xl border border-neutral-200 shadow-sm p-4 space-y-3"
+          >
+            <!-- Cabecera moneda -->
+            <div class="flex items-center gap-2">
+              <span
+                class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                :class="currency === 'USD'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'bg-primary/10 text-primary'"
+              >
+                {{ currency }}
+              </span>
+              <span class="text-sm font-semibold text-neutral-700">
+                {{ currency === 'CRC' ? 'Colones' : 'Dólares' }}
+              </span>
+            </div>
+
+            <!-- Monto -->
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">
+                Saldo inicial {{ currency === 'CRC' ? '(₡)' : '($)' }}
+              </label>
+              <input
+                v-model="obForm[currency].amount"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0"
+                :disabled="obSaving[currency]"
+                class="w-full px-3 py-2.5 rounded-lg border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50 text-right font-semibold tabular-nums"
+              />
+            </div>
+
+            <!-- Fecha de corte -->
+            <div>
+              <label class="block text-xs font-medium text-neutral-700 mb-1">Fecha de corte</label>
+              <input
+                v-model="obForm[currency].date"
+                type="date"
+                :disabled="obSaving[currency]"
+                class="w-full px-3 py-2.5 rounded-lg border border-neutral-200 bg-white text-neutral-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+              />
+            </div>
+
+            <!-- Error -->
+            <div
+              v-if="obError[currency]"
+              role="alert"
+              class="flex items-start gap-2 text-sm text-status-error bg-red-50 rounded-lg px-3 py-2.5"
+            >
+              <svg class="w-4 h-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              {{ obError[currency] }}
+            </div>
+
+            <!-- Éxito -->
+            <div
+              v-if="obSaved[currency]"
+              class="flex items-center gap-2 text-sm text-status-success bg-green-50 rounded-lg px-3 py-2.5"
+            >
+              <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              Saldo inicial {{ currency }} guardado correctamente.
+            </div>
+
+            <!-- Botón guardar -->
+            <button
+              type="button"
+              :disabled="obSaving[currency]"
+              class="w-full py-2.5 px-4 rounded-lg bg-primary hover:bg-primary-c text-white font-semibold text-sm min-h-[44px] transition-colors disabled:opacity-50"
+              @click="saveOpeningBalance(currency)"
+            >
+              <span v-if="obSaving[currency]" class="flex items-center justify-center gap-2">
+                <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                Guardando...
+              </span>
+              <span v-else>Guardar saldo {{ currency }}</span>
+            </button>
+          </div>
+        </template>
       </div>
 
       <!-- Cerrar sesión -->
