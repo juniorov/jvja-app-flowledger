@@ -53,52 +53,42 @@ async function loadFile(file) {
 
 // ── Detección de duplicados ───────────────────────────────────────────────────
 
+/**
+ * Devuelve todos los pares {year, month} cubiertos entre dos fechas (inclusive).
+ */
+function monthsBetween(minDate, maxDate) {
+  const months = []
+  let y = minDate.getFullYear()
+  let m = minDate.getMonth() + 1
+  const endY = maxDate.getFullYear()
+  const endM = maxDate.getMonth() + 1
+  while (y < endY || (y === endY && m <= endM)) {
+    months.push({ year: y, month: m })
+    if (m === 12) { y++; m = 1 } else { m++ }
+  }
+  return months
+}
+
 async function fetchAndMarkDuplicates() {
-  // Obtener el rango de fechas de las filas parseadas
   const dates = rows.value.map((r) => r.date.getTime())
   const minDate = new Date(Math.min(...dates))
   const maxDate = new Date(Math.max(...dates))
 
-  // Leer transacciones del período del workspace para detectar duplicados
-  await new Promise((resolve) => {
-    const unsub = subscribeToTransactions(
-      workspaceStore.workspaceId,
-      minDate.getFullYear(),
-      minDate.getMonth() + 1,
-      (txs) => {
-        markDuplicates(txs)
-        unsub()
-        resolve()
-      },
-      () => {
-        unsub()
-        resolve()
-      }
+  // Consultar TODOS los meses del rango para no dejar huecos
+  const months = monthsBetween(minDate, maxDate)
+  await Promise.all(
+    months.map(({ year, month }) =>
+      new Promise((resolve) => {
+        const unsub = subscribeToTransactions(
+          workspaceStore.workspaceId,
+          year,
+          month,
+          (txs) => { markDuplicates(txs); unsub(); resolve() },
+          () => { unsub(); resolve() }
+        )
+      })
     )
-  })
-
-  // Si el período abarca más de un mes, hacer consulta adicional
-  if (
-    minDate.getFullYear() !== maxDate.getFullYear() ||
-    minDate.getMonth() !== maxDate.getMonth()
-  ) {
-    await new Promise((resolve) => {
-      const unsub = subscribeToTransactions(
-        workspaceStore.workspaceId,
-        maxDate.getFullYear(),
-        maxDate.getMonth() + 1,
-        (txs) => {
-          markDuplicates(txs)
-          unsub()
-          resolve()
-        },
-        () => {
-          unsub()
-          resolve()
-        }
-      )
-    })
-  }
+  )
 }
 
 // ── Guardar ───────────────────────────────────────────────────────────────────
