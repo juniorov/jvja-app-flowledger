@@ -5,6 +5,8 @@ import {
   signOut,
   onAuthStateChanged,
   createUserWithEmailAndPassword,
+  updateProfile,
+  sendPasswordResetEmail,
 } from 'firebase/auth'
 import { auth } from '@/firebase'
 
@@ -42,9 +44,16 @@ export async function loginWithEmail(email, password) {
   return result.user
 }
 
-export async function registerWithEmail(email, password) {
+export async function registerWithEmail(email, password, displayName) {
   const result = await createUserWithEmailAndPassword(auth, email, password)
+  if (displayName) {
+    await updateProfile(result.user, { displayName })
+  }
   return result.user
+}
+
+export async function resetPassword(email) {
+  await sendPasswordResetEmail(auth, email)
 }
 
 export async function logout() {
