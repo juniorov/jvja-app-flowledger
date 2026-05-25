@@ -6,6 +6,7 @@ import {
   loginWithGoogle,
   loginWithEmail,
   registerWithEmail,
+  resetPassword as authResetPassword,
   logout as authLogout,
 } from '@/services/auth.service'
 
@@ -47,11 +48,16 @@ export const useAuthStore = defineStore('auth', () => {
     return u
   }
 
-  async function signUp(email, password) {
+  async function signUp(email, password, displayName) {
     error.value = null
-    const u = await registerWithEmail(email, password)
+    const u = await registerWithEmail(email, password, displayName)
     user.value = u
     return u
+  }
+
+  async function resetPassword(email) {
+    error.value = null
+    await authResetPassword(email)
   }
 
   async function logout() {
@@ -68,6 +74,7 @@ export const useAuthStore = defineStore('auth', () => {
     signInWithGoogle,
     signInWithEmail,
     signUp,
+    resetPassword,
     logout,
   }
 })
