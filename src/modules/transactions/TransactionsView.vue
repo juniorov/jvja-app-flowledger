@@ -327,6 +327,56 @@ function txBreakdown(tx) {
               <!-- Marcado distribuible pero sin crédito calculable -->
               <dd v-else class="text-sm text-primary font-medium">Sí</dd>
             </div>
+            <div v-if="selectedTx.isInvestment" class="flex flex-col gap-1">
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Inversión / préstamo</dt>
+              <dd class="rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 space-y-1">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs text-neutral-500">Interés pactado</span>
+                  <span class="text-xs font-semibold text-neutral-900 tabular-nums">{{ selectedTx.interestRate }}%</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-xs text-neutral-500">Capital devuelto</span>
+                  <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                    {{ formatAmount(selectedTx.returnedPrincipal || 0, selectedTx.currency) }} / {{ formatAmount(selectedTx.debit, selectedTx.currency) }}
+                  </span>
+                </div>
+                <div v-if="selectedTx.returnedInterest > 0" class="flex justify-between items-center">
+                  <span class="text-xs text-neutral-500">Interés recibido</span>
+                  <span class="text-xs font-semibold text-status-success tabular-nums">
+                    {{ formatAmount(selectedTx.returnedInterest || 0, selectedTx.currency) }}
+                  </span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-xs text-neutral-500">Estado</span>
+                  <span
+                    class="text-xs font-semibold"
+                    :class="selectedTx.investmentStatus === 'returned' ? 'text-status-success' : 'text-secondary-orange'"
+                  >
+                    {{ { pending: 'Pendiente', partial: 'Parcial', returned: 'Saldada' }[selectedTx.investmentStatus] || 'Pendiente' }}
+                  </span>
+                </div>
+              </dd>
+            </div>
+            <div v-if="selectedTx.isInvestmentReturn" class="flex flex-col gap-1">
+              <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Retorno de inversión</dt>
+              <dd class="rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 space-y-1">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs text-neutral-500">Capital de este pago</span>
+                  <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                    {{ formatAmount(selectedTx.returnPrincipal || 0, selectedTx.currency) }}
+                  </span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-xs font-semibold text-neutral-700">Interés de este pago</span>
+                  <span
+                    class="text-sm font-bold tabular-nums"
+                    :class="(selectedTx.returnInterest || 0) >= 0 ? 'text-status-success' : 'text-status-error'"
+                  >
+                    {{ formatAmount(selectedTx.returnInterest || 0, selectedTx.currency) }}
+                  </span>
+                </div>
+              </dd>
+            </div>
             <div v-if="selectedTx.importedFrom" class="flex flex-col gap-0.5">
               <dt class="text-[11px] font-semibold text-neutral-400 uppercase tracking-wide">Importado de</dt>
               <dd class="text-sm text-neutral-500 truncate">{{ selectedTx.importedFrom }}</dd>

@@ -11,6 +11,8 @@ const props = defineProps({
 
 defineEmits(['tap'])
 
+const INVESTMENT_STATUS_LABELS = { pending: 'pendiente', partial: 'parcial', returned: 'saldada' }
+
 const tx = props.transaction
 const isIncome = tx.type === 'income'
 const amount = isIncome ? tx.credit : tx.debit
@@ -68,6 +70,16 @@ const displayText = tx.notes?.trim() || tx.description || '—'
         <template v-if="transaction.isDistributable">
           <span class="text-neutral-200 shrink-0">·</span>
           <span class="text-[10px] font-semibold text-primary shrink-0">dist.</span>
+        </template>
+        <template v-if="transaction.isInvestment">
+          <span class="text-neutral-200 shrink-0">·</span>
+          <span class="text-[10px] font-semibold text-secondary-orange shrink-0">
+            inversión · {{ INVESTMENT_STATUS_LABELS[transaction.investmentStatus] || 'pendiente' }}
+          </span>
+        </template>
+        <template v-if="transaction.isInvestmentReturn">
+          <span class="text-neutral-200 shrink-0">·</span>
+          <span class="text-[10px] font-semibold text-secondary-orange shrink-0">retorno inversión</span>
         </template>
       </div>
     </div>

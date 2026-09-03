@@ -82,6 +82,7 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
         distributableIncome: 0,
         totalTax: 0,
         totalFixedCosts: 0,
+        totalInvestmentGain: 0,
       }
     }
 
@@ -94,6 +95,11 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
       c.distributableIncome += credit
       c.totalTax += tx.hasTax ? (tx.taxAmount ?? credit * 0.13) : 0
       c.totalFixedCosts += tx.fixedCosts || 0
+    }
+
+    // Ganancia por préstamos — categoría separada, no entra a distributableIncome
+    if (tx.type === 'income' && tx.isInvestmentReturn) {
+      c.totalInvestmentGain += tx.investmentGain || 0
     }
   }
 
@@ -120,6 +126,7 @@ export function groupTransactionsByPeriod(transactions, partners = []) {
         totalFixedCosts: c.totalFixedCosts,
         netDistributable,
         distribution: calculateDistribution(netDistributable, partners),
+        totalInvestmentGain: c.totalInvestmentGain,
       })
     }
 

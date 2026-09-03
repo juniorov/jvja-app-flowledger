@@ -197,3 +197,41 @@ describe('groupTransactionsByPeriod — distribución', () => {
     expect(period.currencies[0].netDistributable).toBe(0)
   })
 })
+
+// ── groupTransactionsByPeriod — ganancia por préstamos ───────────────────────
+
+describe('groupTransactionsByPeriod — ganancia por préstamos', () => {
+  it('acumula investmentGain de ingresos marcados como retorno de inversión', () => {
+    const txs = [
+      tx({ date: new Date(2026, 3, 1), credit: 110000, type: 'income', isInvestmentReturn: true, investmentGain: 10000 }),
+    ]
+    const [period] = groupTransactionsByPeriod(txs, partners)
+    expect(period.currencies[0].totalInvestmentGain).toBe(10000)
+  })
+
+  it('no cuenta la ganancia de egresos de inversión pendientes', () => {
+    const txs = [
+      tx({ date: new Date(2026, 3, 1), debit: 100000, type: 'expense', isInvestment: true }),
+    ]
+    const [period] = groupTransactionsByPeriod(txs, partners)
+    expect(period.currencies[0].totalInvestmentGain).toBe(0)
+  })
+
+  it('no afecta distributableIncome ni netDistributable', () => {
+    const txs = [
+      tx({ date: new Date(2026, 3, 1), credit: 110000, type: 'income', isInvestmentReturn: true, investmentGain: 10000 }),
+    ]
+    const [period] = groupTransactionsByPeriod(txs, partners)
+    expect(period.currencies[0].distributableIncome).toBe(0)
+    expect(period.currencies[0].netDistributable).toBe(0)
+  })
+
+  it('acumula ganancias de múltiples retornos', () => {
+    const txs = [
+      tx({ date: new Date(2026, 3, 1), credit: 110000, type: 'income', isInvestmentReturn: true, investmentGain: 10000 }),
+      tx({ date: new Date(2026, 3, 5), credit: 55000,  type: 'income', isInvestmentReturn: true, investmentGain: 5000  }),
+    ]
+    const [period] = groupTransactionsByPeriod(txs, partners)
+    expect(period.currencies[0].totalInvestmentGain).toBe(15000)
+  })
+})

@@ -6,16 +6,19 @@ import {
   deleteDoc,
   setDoc,
   getDoc,
+  getDocs,
   query,
   where,
   orderBy,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   Timestamp,
   writeBatch,
 } from 'firebase/firestore'
 import { db } from '@/firebase'
 import { dateStringToDate } from '@/shared/utils/formatters'
+import { computeInvestmentStatus } from '@/composables/useInvestments'
 
 /**
  * @param {string} workspaceId
@@ -101,6 +104,11 @@ export async function createTransaction(workspaceId, formData, uid) {
   const distributable = isIncome && !!formData.isDistributable
   const hasTax = distributable && !!formData.hasTax
   const credit = isIncome ? amount : 0
+  const isInvestment = !isIncome && !!formData.isInvestment
+  const isInvestmentReturn = isIncome && !!formData.isInvestmentReturn
+  const returnPrincipal = isInvestmentReturn ? Number(formData.returnPrincipal) || 0 : 0
+  const returnInterest = isInvestmentReturn ? Math.max(credit - returnPrincipal, 0) : 0
+
   const tx = {
     date: Timestamp.fromDate(dateStringToDate(formData.date)),
     reference: formData.reference?.trim() || '',
@@ -116,6 +124,20 @@ export async function createTransaction(workspaceId, formData, uid) {
     hasTax,
     taxAmount: hasTax ? credit * 0.13 : 0,
     fixedCosts: distributable ? Number(formData.fixedCosts) || 0 : 0,
+    // Egresos marcados como préstamo — el saldo se acumula en returnedPrincipal/returnedInterest
+    // a medida que se enlazan retornos (parciales o completos, capital y/o interés).
+    isInvestment,
+    interestRate: isInvestment ? Number(formData.interestRate) || 0 : 0,
+    investmentStatus: isInvestment ? 'pending' : null,
+    returnedPrincipal: 0,
+    returnedInterest: 0,
+    linkedReturnTxIds: [],
+    // Ingresos marcados como retorno de un préstamo — pueden ser parciales y/o solo interés.
+    isInvestmentReturn,
+    linkedInvestmentTxId: isInvestmentReturn ? formData.linkedInvestmentTxId || null : null,
+    returnPrincipal,
+    returnInterest,
+    investmentGain: returnInterest,
     importedFrom: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -123,7 +145,61 @@ export async function createTransaction(workspaceId, formData, uid) {
   }
 
   const ref = await addDoc(txCollection(workspaceId), tx)
+
+  if (isInvestmentReturn && formData.linkedInvestmentTxId) {
+    await applyInvestmentReturn(workspaceId, formData.linkedInvestmentTxId, {
+      returnTxId: ref.id,
+      principal: returnPrincipal,
+      interest: returnInterest,
+    })
+  }
+
   return ref.id
+}
+
+/**
+ * Aplica un retorno (parcial o completo, capital y/o interés) a un egreso de
+ * inversión, acumulando los totales y recalculando su estado. Usa una
+ * transacción de Firestore para evitar condiciones de carrera entre retornos
+ * concurrentes sobre el mismo préstamo.
+ *
+ * @param {string} workspaceId
+ * @param {string} investmentTxId  ID del egreso de inversión
+ * @param {{ returnTxId: string, principal: number, interest: number }} payload
+ */
+export async function applyInvestmentReturn(workspaceId, investmentTxId, { returnTxId, principal, interest }) {
+  const ref = doc(db, 'workspaces', workspaceId, 'transactions', investmentTxId)
+  await runTransaction(db, async (trx) => {
+    const snap = await trx.get(ref)
+    if (!snap.exists()) return
+    const data = snap.data()
+    const returnedPrincipal = (data.returnedPrincipal || 0) + (Number(principal) || 0)
+    const returnedInterest = (data.returnedInterest || 0) + (Number(interest) || 0)
+    trx.update(ref, {
+      returnedPrincipal,
+      returnedInterest,
+      investmentStatus: computeInvestmentStatus(data.debit || 0, returnedPrincipal),
+      linkedReturnTxIds: [...(data.linkedReturnTxIds || []), returnTxId],
+      updatedAt: serverTimestamp(),
+    })
+  })
+}
+
+/**
+ * Obtiene los egresos de inversión con saldo de capital pendiente (parcial o
+ * total) de una moneda — para el selector de "retorno de inversión".
+ *
+ * @param {string} workspaceId
+ * @param {'CRC'|'USD'} currency
+ * @returns {Promise<object[]>}
+ */
+export async function getPendingInvestments(workspaceId, currency) {
+  const q = query(txCollection(workspaceId), where('isInvestment', '==', true))
+  const snap = await getDocs(q)
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((tx) => tx.investmentStatus !== 'returned' && tx.currency === currency)
+    .sort((a, b) => (b.date?.toMillis?.() || 0) - (a.date?.toMillis?.() || 0))
 }
 
 /**

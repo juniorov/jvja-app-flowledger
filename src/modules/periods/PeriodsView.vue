@@ -13,6 +13,7 @@ import {
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useTransactionStore } from '@/stores/useTransactionStore'
 import { usePeriods, groupTransactionsByPeriod } from '@/composables/usePeriods'
+import { summarizeInvestments } from '@/composables/useInvestments'
 import { formatMonthYear, formatAmount } from '@/shared/utils/formatters'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
@@ -69,6 +70,72 @@ const globalStats = computed(() => {
 })
 
 const hasData = computed(() => transactions.value.length > 0)
+
+// ── Inversiones / préstamos ──────────────────────────────────────────────────
+
+const investmentsSummary = computed(() => summarizeInvestments(transactions.value))
+
+const investmentCurrencies = computed(() =>
+  ['CRC', 'USD'].filter((cur) => {
+    const s = investmentsSummary.value[cur]
+    return s && (s.totalGain !== 0 || s.outstandingPrincipal !== 0 || s.activeLoans.length > 0)
+  })
+)
+
+const hasInvestmentActivity = computed(() => investmentCurrencies.value.length > 0)
+
+const INVESTMENT_STATUS_LABELS = { pending: 'Pendiente', partial: 'Parcial' }
+
+// ── Slider "Por período" ──────────────────────────────────────────────────────
+// periods está ordenado de más reciente a más antiguo (índice 0 = el más nuevo).
+
+const periodIndex = ref(0)
+
+function currentPeriodKey() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Al cargar/cambiar la lista, ubicarse en el mes actual si existe, si no en el más reciente.
+watch(
+  periods,
+  (list) => {
+    if (!list.length) {
+      periodIndex.value = 0
+      return
+    }
+    const key = currentPeriodKey()
+    const idx = list.findIndex((p) => p.key === key)
+    periodIndex.value = idx >= 0 ? idx : 0
+  },
+  { immediate: true }
+)
+
+const currentPeriod = computed(() => periods.value[periodIndex.value] || null)
+const hasOlderPeriod = computed(() => periodIndex.value < periods.value.length - 1)
+const hasNewerPeriod = computed(() => periodIndex.value > 0)
+
+function goToOlderPeriod() {
+  if (hasOlderPeriod.value) periodIndex.value += 1
+}
+function goToNewerPeriod() {
+  if (hasNewerPeriod.value) periodIndex.value -= 1
+}
+
+// Swipe táctil: deslizar a la izquierda = mes anterior, a la derecha = mes siguiente.
+const touchStartX = ref(null)
+
+function onPeriodTouchStart(e) {
+  touchStartX.value = e.changedTouches[0].clientX
+}
+function onPeriodTouchEnd(e) {
+  if (touchStartX.value === null) return
+  const delta = e.changedTouches[0].clientX - touchStartX.value
+  const SWIPE_THRESHOLD = 40
+  if (delta <= -SWIPE_THRESHOLD) goToOlderPeriod()
+  else if (delta >= SWIPE_THRESHOLD) goToNewerPeriod()
+  touchStartX.value = null
+}
 
 // ── Gráfico ────────────────────────────────────────────────────────────────────
 
@@ -309,6 +376,61 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <!-- ── Inversiones / préstamos ─────────────────────────────────────── -->
+        <section v-if="hasInvestmentActivity" class="space-y-3">
+          <h2 class="text-xs font-bold text-neutral-400 uppercase tracking-widest">Inversiones y préstamos</h2>
+
+          <div
+            v-for="cur in investmentCurrencies"
+            :key="cur"
+            class="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden"
+          >
+            <div v-if="investmentCurrencies.length > 1" class="px-4 pt-4 pb-1">
+              <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                {{ cur }}
+              </span>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-2 gap-2 px-4 pt-3 pb-4">
+              <div class="bg-status-success/10 rounded-xl px-3 py-2.5">
+                <p class="text-[10px] font-semibold text-status-success uppercase tracking-wide">Ganancia por intereses</p>
+                <p class="text-sm font-bold text-status-success tabular-nums mt-0.5 truncate">
+                  {{ formatAmount(investmentsSummary[cur].totalGain, cur) }}
+                </p>
+              </div>
+              <div class="bg-secondary-orange/10 rounded-xl px-3 py-2.5">
+                <p class="text-[10px] font-semibold text-secondary-orange uppercase tracking-wide">En préstamo ahora</p>
+                <p class="text-sm font-bold text-secondary-orange tabular-nums mt-0.5 truncate">
+                  {{ formatAmount(investmentsSummary[cur].outstandingPrincipal, cur) }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Préstamos activos -->
+            <div v-if="investmentsSummary[cur].activeLoans.length" class="border-t border-neutral-100 divide-y divide-neutral-100">
+              <div
+                v-for="loan in investmentsSummary[cur].activeLoans"
+                :key="loan.id"
+                class="flex items-center justify-between px-4 py-2.5 gap-2"
+              >
+                <div class="min-w-0">
+                  <p class="text-xs font-medium text-neutral-800 truncate">{{ loan.description }}</p>
+                  <p class="text-[10px] text-neutral-400">
+                    {{ INVESTMENT_STATUS_LABELS[loan.status] }} · {{ loan.interestRate }}% interés
+                  </p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="text-xs font-bold text-secondary-orange tabular-nums">
+                    {{ formatAmount(loan.remaining, cur) }}
+                  </p>
+                  <p class="text-[10px] text-neutral-400">de {{ formatAmount(loan.debit, cur) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- ── Gráfico ─────────────────────────────────────────────────────── -->
         <section class="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4 space-y-3">
 
@@ -362,9 +484,39 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <!-- ── Lista de períodos ───────────────────────────────────────────── -->
+        <!-- ── Por período (slider) ────────────────────────────────────────── -->
         <section class="space-y-4">
-          <h2 class="text-xs font-bold text-neutral-400 uppercase tracking-widest">Por período</h2>
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-bold text-neutral-400 uppercase tracking-widest">Por período</h2>
+            <!-- Navegación entre meses -->
+            <div v-if="periods.length > 1" class="flex items-center gap-1">
+              <button
+                type="button"
+                :disabled="!hasOlderPeriod"
+                class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                aria-label="Mes anterior"
+                @click="goToOlderPeriod"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <polyline points="15 18 9 12 15 6"/>
+                </svg>
+              </button>
+              <span class="text-[10px] font-semibold text-neutral-400 tabular-nums w-10 text-center">
+                {{ periodIndex + 1 }}/{{ periods.length }}
+              </span>
+              <button
+                type="button"
+                :disabled="!hasNewerPeriod"
+                class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-500 hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent transition"
+                aria-label="Mes siguiente"
+                @click="goToNewerPeriod"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </button>
+            </div>
+          </div>
 
           <!-- Sin períodos para el filtro activo -->
           <div
@@ -374,28 +526,30 @@ onUnmounted(() => {
             <p class="text-sm text-neutral-400">Sin períodos para la moneda seleccionada.</p>
           </div>
 
-          <!-- Cards de período -->
+          <!-- Card del período actual (deslizable) -->
           <div
-            v-for="period in periods"
-            :key="period.key"
+            v-else-if="currentPeriod"
+            :key="currentPeriod.key"
             class="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden"
+            @touchstart="onPeriodTouchStart"
+            @touchend="onPeriodTouchEnd"
           >
             <!-- Cabecera del período -->
             <div class="px-4 pt-4 pb-3 border-b border-neutral-100">
               <h3 class="text-base font-bold text-neutral-900">
-                {{ formatMonthYear(period.year, period.month) }}
+                {{ formatMonthYear(currentPeriod.year, currentPeriod.month) }}
               </h3>
             </div>
 
             <!-- Sección por moneda -->
             <div
-              v-for="(c, idx) in period.currencies"
+              v-for="(c, idx) in currentPeriod.currencies"
               :key="c.currency"
               :class="idx > 0 ? 'border-t border-neutral-100' : ''"
               class="px-4 pt-3 pb-4 space-y-3"
             >
               <!-- Badge de moneda (solo si hay más de una) -->
-              <div v-if="period.currencies.length > 1" class="flex items-center gap-1.5">
+              <div v-if="currentPeriod.currencies.length > 1" class="flex items-center gap-1.5">
                 <span
                   class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
                   :class="c.currency === 'USD'
@@ -438,6 +592,19 @@ onUnmounted(() => {
                   :class="c.balance >= 0 ? 'text-primary' : 'text-status-error'"
                 >
                   {{ formatAmount(c.balance, c.currency) }}
+                </span>
+              </div>
+
+              <!-- Ganancia por préstamos (categoría separada, no se reparte) -->
+              <div
+                v-if="c.totalInvestmentGain !== 0"
+                class="rounded-xl px-3 py-2.5 flex items-center justify-between bg-secondary-orange/10"
+              >
+                <span class="text-xs font-semibold uppercase tracking-wide text-secondary-orange">
+                  Ganancia por préstamos
+                </span>
+                <span class="text-sm font-bold tabular-nums text-secondary-orange">
+                  {{ formatAmount(c.totalInvestmentGain, c.currency) }}
                 </span>
               </div>
 

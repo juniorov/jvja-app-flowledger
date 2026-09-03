@@ -1,11 +1,18 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Timestamp } from 'firebase/firestore'
 import { useTransactionStore } from '@/stores/useTransactionStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useAuthStore } from '@/stores/useAuthStore'
 import { formatAmount, dateToInputString, dateStringToDate } from '@/shared/utils/formatters'
+import { getPendingInvestments, applyInvestmentReturn } from '@/services/transaction.service'
+import {
+  computeExpectedReturn,
+  computeRemainingPrincipal,
+  computeInvestmentStatus,
+  computeReturnInterest,
+} from '@/composables/useInvestments'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,9 +40,102 @@ const form = reactive({
   isDistributable: false,
   fixedCosts: '',
   hasTax: false,
+  isInvestment: false,
+  interestRate: '',
+  isInvestmentReturn: false,
+  linkedInvestmentTxId: '',
+  returnPrincipal: '',
 })
 
 const isImported = computed(() => !!originalTx.value?.importedFrom)
+
+// ── Inversiones / préstamos ──────────────────────────────────────────────────
+
+const pendingInvestments = ref([])
+const loadingInvestments = ref(false)
+
+async function loadPendingInvestments() {
+  if (!workspaceStore.workspaceId) return
+  loadingInvestments.value = true
+  try {
+    pendingInvestments.value = await getPendingInvestments(
+      workspaceStore.workspaceId,
+      form.currency
+    )
+  } catch {
+    pendingInvestments.value = []
+  } finally {
+    loadingInvestments.value = false
+  }
+}
+
+watch(
+  () => [form.type, form.isInvestmentReturn, form.currency],
+  () => {
+    if (form.type === 'income' && form.isInvestmentReturn) {
+      loadPendingInvestments()
+    }
+  }
+)
+
+// Ganancia esperada del préstamo — solo referencia visual, no se guarda
+const expectedReturn = computed(() => {
+  if (form.type !== 'expense' || !form.isInvestment) return null
+  const amount = Number(form.amount) || 0
+  if (amount <= 0) return null
+  return {
+    amount,
+    interestRate: Number(form.interestRate) || 0,
+    total: computeExpectedReturn(amount, form.interestRate),
+    gain: computeExpectedReturn(amount, form.interestRate) - amount,
+    currency: form.currency,
+  }
+})
+
+const selectedInvestment = computed(() =>
+  pendingInvestments.value.find((tx) => tx.id === form.linkedInvestmentTxId) || null
+)
+
+// Saldo de capital pendiente del préstamo seleccionado (antes de este pago)
+const remainingPrincipal = computed(() => {
+  if (!selectedInvestment.value) return 0
+  return computeRemainingPrincipal(selectedInvestment.value.debit, selectedInvestment.value.returnedPrincipal)
+})
+
+// Interés de este pago — el resto del monto luego de restar el capital declarado.
+// Puede superar el interés estimado (ej. el cliente da algo extra) sin restricción.
+const returnInterestPreview = computed(() => {
+  if (form.type !== 'income' || !form.isInvestmentReturn || !selectedInvestment.value) return null
+  const amount = Number(form.amount) || 0
+  const principal = Number(form.returnPrincipal) || 0
+  return computeReturnInterest(amount, principal)
+})
+
+// Estado resultante del préstamo si se aplica este pago
+const resultingStatus = computed(() => {
+  if (!selectedInvestment.value) return null
+  const principal = Number(form.returnPrincipal) || 0
+  const totalReturned = (selectedInvestment.value.returnedPrincipal || 0) + principal
+  return computeInvestmentStatus(selectedInvestment.value.debit, totalReturned)
+})
+
+const statusLabels = {
+  pending: 'Pendiente',
+  partial: 'Parcial',
+  returned: 'Saldado',
+}
+
+// Al editar un retorno ya guardado, el enlace y los montos quedan fijos
+// (modificarlos rompería los acumulados del préstamo original).
+const investmentReturnLocked = computed(() => isEdit.value && !!originalTx.value?.isInvestmentReturn)
+
+// Al editar un préstamo que ya recibió algún retorno, no se permite tocar
+// el interés/estado — ya hay pagos aplicados contra los valores originales.
+const investmentLocked = computed(() =>
+  isEdit.value &&
+  !!originalTx.value?.isInvestment &&
+  (originalTx.value?.returnedPrincipal > 0 || originalTx.value?.returnedInterest > 0)
+)
 
 // Desglose de distribución en tiempo real
 const breakdown = computed(() => {
@@ -94,6 +194,17 @@ async function loadTransaction() {
     form.isDistributable = tx.isDistributable ?? false
     form.fixedCosts = tx.fixedCosts || ''
     form.hasTax = tx.hasTax ?? false
+    form.isInvestment = tx.isInvestment ?? false
+    form.interestRate = tx.interestRate || ''
+    form.isInvestmentReturn = tx.isInvestmentReturn ?? false
+    form.linkedInvestmentTxId = tx.linkedInvestmentTxId || ''
+    form.returnPrincipal = tx.returnPrincipal || ''
+
+    // Si ya tiene un préstamo enlazado, agregarlo a la lista para poder mostrarlo
+    if (tx.linkedInvestmentTxId) {
+      const linked = await store.fetchOne(workspaceStore.workspaceId, tx.linkedInvestmentTxId)
+      if (linked) pendingInvestments.value = [linked]
+    }
   } catch {
     errorMsg.value = 'No se pudo cargar la transacción.'
   } finally {
@@ -115,6 +226,21 @@ function validate() {
   }
   if (form.isDistributable && form.fixedCosts !== '' && Number(form.fixedCosts) < 0) {
     return 'Los costos fijos no pueden ser negativos.'
+  }
+  if (form.type === 'expense' && form.isInvestment && !investmentLocked.value) {
+    const rate = Number(form.interestRate)
+    if (form.interestRate === '' || isNaN(rate) || rate < 0) {
+      return 'El porcentaje de interés es obligatorio y no puede ser negativo.'
+    }
+  }
+  if (form.type === 'income' && form.isInvestmentReturn && !investmentReturnLocked.value) {
+    if (!form.linkedInvestmentTxId) return 'Seleccioná el préstamo al que corresponde este retorno.'
+    const principal = Number(form.returnPrincipal) || 0
+    if (principal < 0) return 'El capital recibido no puede ser negativo.'
+    if (principal > amt) return 'El capital recibido no puede ser mayor al monto del ingreso.'
+    if (selectedInvestment.value && principal > remainingPrincipal.value + 0.01) {
+      return 'El capital recibido no puede exceder el saldo pendiente del préstamo.'
+    }
   }
   return null
 }
@@ -147,6 +273,17 @@ async function handleSave() {
       } else {
         const isIncome = form.type === 'income'
         const amount = Number(form.amount)
+        const isInvestment = !isIncome && form.isInvestment
+        const isInvestmentReturn = isIncome && form.isInvestmentReturn
+        // Enlace nuevo: solo se aplica cuando este retorno se está creando por
+        // primera vez como tal. Uno ya existente queda con sus montos fijos
+        // (investmentReturnLocked bloquea la UI para editarlos).
+        const isNewLink = isInvestmentReturn && !investmentReturnLocked.value
+        const returnPrincipal = isNewLink ? Number(form.returnPrincipal) || 0 : (originalTx.value?.returnPrincipal || 0)
+        const returnInterest = isNewLink
+          ? computeReturnInterest(amount, returnPrincipal)
+          : (originalTx.value?.returnInterest || 0)
+
         data = {
           date: Timestamp.fromDate(dateStringToDate(form.date)),
           description: form.description.trim(),
@@ -162,6 +299,25 @@ async function handleSave() {
           hasTax: isIncome && form.isDistributable ? form.hasTax : false,
           taxAmount: isIncome && form.isDistributable && form.hasTax ? amount * 0.13 : 0,
           fixedCosts: isIncome && form.isDistributable ? Number(form.fixedCosts) || 0 : 0,
+          isInvestment,
+          interestRate: isInvestment ? Number(form.interestRate) || 0 : 0,
+          isInvestmentReturn,
+          linkedInvestmentTxId: isInvestmentReturn ? form.linkedInvestmentTxId : null,
+          returnPrincipal,
+          returnInterest,
+          investmentGain: returnInterest,
+          // Si el egreso se marca como inversión por primera vez, inicializar sus acumulados
+          ...(isInvestment && !originalTx.value?.isInvestment
+            ? { investmentStatus: 'pending', returnedPrincipal: 0, returnedInterest: 0, linkedReturnTxIds: [] }
+            : {}),
+        }
+
+        if (isNewLink && form.linkedInvestmentTxId) {
+          await applyInvestmentReturn(workspaceStore.workspaceId, form.linkedInvestmentTxId, {
+            returnTxId: route.params.id,
+            principal: returnPrincipal,
+            interest: returnInterest,
+          })
         }
       }
 
@@ -254,7 +410,7 @@ async function handleDelete() {
             :class="form.type === 'income'
               ? 'border-status-success bg-status-success/10 text-status-success'
               : 'border-neutral-200 text-neutral-500'"
-            @click="form.type = 'income'"
+            @click="form.type = 'income'; form.isInvestment = false"
           >
             Ingreso
           </button>
@@ -264,7 +420,7 @@ async function handleDelete() {
             :class="form.type === 'expense'
               ? 'border-status-error bg-status-error/10 text-status-error'
               : 'border-neutral-200 text-neutral-500'"
-            @click="form.type = 'expense'; form.isDistributable = false"
+            @click="form.type = 'expense'; form.isDistributable = false; form.isInvestmentReturn = false"
           >
             Egreso
           </button>
@@ -465,6 +621,221 @@ async function handleDelete() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Inversión / préstamo (solo para egresos manuales) -->
+      <div v-if="form.type === 'expense' && !isImported">
+        <div class="flex items-center justify-between bg-white rounded-2xl border border-neutral-100 px-4 py-3.5">
+          <div>
+            <p class="text-sm font-medium text-neutral-900">Es una inversión / préstamo</p>
+            <p class="text-xs text-neutral-400 mt-0.5">Dinero prestado a un tercero con interés</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="form.isInvestment"
+            class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition cursor-pointer"
+            :class="form.isInvestment ? 'bg-primary' : 'bg-neutral-200'"
+            :disabled="loading || investmentLocked"
+            @click="form.isInvestment = !form.isInvestment"
+          >
+            <span
+              class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition"
+              :class="form.isInvestment ? 'translate-x-5' : 'translate-x-0'"
+            />
+          </button>
+        </div>
+
+        <div v-if="form.isInvestment" class="mt-3 space-y-3">
+          <!-- Aviso de bloqueo: ya tiene retornos aplicados -->
+          <p v-if="investmentLocked" class="text-xs text-neutral-400">
+            Este préstamo ya tiene retornos registrados — el interés y el estado no se pueden modificar.
+          </p>
+
+          <!-- % de interés -->
+          <div>
+            <label for="tx-interest-rate" class="block text-sm font-medium text-neutral-700 mb-1.5">
+              Porcentaje de interés
+            </label>
+            <input
+              id="tx-interest-rate"
+              v-model="form.interestRate"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0"
+              :disabled="loading || investmentLocked"
+              class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+            />
+          </div>
+
+          <!-- Saldo ya devuelto (si aplica) -->
+          <div v-if="investmentLocked" class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden">
+            <div class="space-y-0 divide-y divide-neutral-100">
+              <div class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Capital devuelto</span>
+                <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                  {{ formatAmount(originalTx.returnedPrincipal || 0, form.currency) }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Interés recibido</span>
+                <span class="text-xs font-semibold text-status-success tabular-nums">
+                  {{ formatAmount(originalTx.returnedInterest || 0, form.currency) }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center px-4 py-2.5 bg-white">
+                <span class="text-xs font-semibold text-neutral-700">Estado</span>
+                <span class="text-xs font-bold text-primary">{{ statusLabels[originalTx.investmentStatus] }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Precálculo de ganancia esperada (solo referencia, no se guarda) -->
+          <div v-if="expectedReturn && !investmentLocked" class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden">
+            <p class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wide px-4 pt-3 pb-2">
+              Ganancia estimada (solo referencia)
+            </p>
+            <div class="space-y-0 divide-y divide-neutral-100">
+              <div class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Monto prestado</span>
+                <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                  {{ formatAmount(expectedReturn.amount, expectedReturn.currency) }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center px-4 py-2.5">
+                <span class="text-xs text-neutral-500">Interés ({{ expectedReturn.interestRate }}%)</span>
+                <span class="text-xs font-semibold text-status-success tabular-nums">
+                  + {{ formatAmount(expectedReturn.gain, expectedReturn.currency) }}
+                </span>
+              </div>
+              <div class="flex justify-between items-center px-4 py-2.5 bg-white">
+                <span class="text-xs font-semibold text-neutral-700">Retorno esperado</span>
+                <span class="text-sm font-bold text-primary tabular-nums">
+                  {{ formatAmount(expectedReturn.total, expectedReturn.currency) }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Retorno de inversión (solo para ingresos manuales) -->
+      <div v-if="form.type === 'income' && !isImported">
+        <div class="flex items-center justify-between bg-white rounded-2xl border border-neutral-100 px-4 py-3.5">
+          <div>
+            <p class="text-sm font-medium text-neutral-900">Es retorno de una inversión</p>
+            <p class="text-xs text-neutral-400 mt-0.5">Pago de un préstamo hecho anteriormente</p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="form.isInvestmentReturn"
+            class="relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition cursor-pointer"
+            :class="form.isInvestmentReturn ? 'bg-primary' : 'bg-neutral-200'"
+            :disabled="loading || investmentReturnLocked"
+            @click="form.isInvestmentReturn = !form.isInvestmentReturn"
+          >
+            <span
+              class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transform transition"
+              :class="form.isInvestmentReturn ? 'translate-x-5' : 'translate-x-0'"
+            />
+          </button>
+        </div>
+
+        <div v-if="form.isInvestmentReturn" class="mt-3 space-y-3">
+          <!-- Ya aplicado: solo lectura -->
+          <template v-if="investmentReturnLocked">
+            <p class="text-xs text-neutral-400">
+              Este retorno ya fue aplicado al préstamo — no se puede modificar.
+            </p>
+            <div class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden">
+              <div class="space-y-0 divide-y divide-neutral-100">
+                <div v-if="selectedInvestment" class="flex justify-between items-center px-4 py-2.5">
+                  <span class="text-xs text-neutral-500">Préstamo</span>
+                  <span class="text-xs font-semibold text-neutral-900 truncate max-w-[60%]">{{ selectedInvestment.description }}</span>
+                </div>
+                <div class="flex justify-between items-center px-4 py-2.5">
+                  <span class="text-xs text-neutral-500">Capital de este pago</span>
+                  <span class="text-xs font-semibold text-neutral-900 tabular-nums">
+                    {{ formatAmount(originalTx.returnPrincipal || 0, form.currency) }}
+                  </span>
+                </div>
+                <div class="flex justify-between items-center px-4 py-2.5 bg-white">
+                  <span class="text-xs font-semibold text-neutral-700">Interés de este pago</span>
+                  <span class="text-sm font-bold text-status-success tabular-nums">
+                    {{ formatAmount(originalTx.returnInterest || 0, form.currency) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Retorno nuevo: editable -->
+          <template v-else>
+            <!-- Selector de préstamo con saldo pendiente -->
+            <div>
+              <label for="tx-linked-investment" class="block text-sm font-medium text-neutral-700 mb-1.5">
+                Préstamo asociado
+              </label>
+              <select
+                id="tx-linked-investment"
+                v-model="form.linkedInvestmentTxId"
+                :disabled="loading || loadingInvestments"
+                class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+              >
+                <option value="" disabled>
+                  {{ loadingInvestments ? 'Cargando préstamos...' : 'Seleccionar préstamo pendiente' }}
+                </option>
+                <option v-for="inv in pendingInvestments" :key="inv.id" :value="inv.id">
+                  {{ inv.description }} — resta {{ formatAmount(computeRemainingPrincipal(inv.debit, inv.returnedPrincipal), inv.currency) }} de {{ formatAmount(inv.debit, inv.currency) }}
+                </option>
+              </select>
+              <p v-if="!loadingInvestments && !pendingInvestments.length" class="text-xs text-neutral-400 mt-1.5">
+                No hay préstamos con saldo pendiente en {{ form.currency }}.
+              </p>
+            </div>
+
+            <template v-if="selectedInvestment">
+              <!-- Capital recibido en este pago -->
+              <div>
+                <label for="tx-return-principal" class="block text-sm font-medium text-neutral-700 mb-1.5">
+                  Capital recibido en este pago <span class="text-neutral-400 font-normal">(opcional)</span>
+                </label>
+                <input
+                  id="tx-return-principal"
+                  v-model="form.returnPrincipal"
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="0"
+                  :disabled="loading"
+                  class="w-full px-4 py-3 rounded-xl border border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 text-base min-h-[48px] focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition disabled:opacity-50"
+                />
+                <p class="text-xs text-neutral-400 mt-1.5">
+                  Saldo pendiente del préstamo: {{ formatAmount(remainingPrincipal, form.currency) }}.
+                  Dejalo en 0 si este pago es solo de intereses.
+                </p>
+              </div>
+
+              <!-- Desglose de este pago -->
+              <div class="rounded-2xl border border-neutral-100 bg-neutral-50 overflow-hidden">
+                <div class="space-y-0 divide-y divide-neutral-100">
+                  <div class="flex justify-between items-center px-4 py-2.5">
+                    <span class="text-xs text-neutral-500">Interés de este pago</span>
+                    <span class="text-xs font-semibold text-status-success tabular-nums">
+                      {{ formatAmount(returnInterestPreview || 0, form.currency) }}
+                    </span>
+                  </div>
+                  <div class="flex justify-between items-center px-4 py-2.5 bg-white">
+                    <span class="text-xs font-semibold text-neutral-700">Estado del préstamo tras este pago</span>
+                    <span class="text-xs font-bold text-primary">{{ statusLabels[resultingStatus] }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </template>
         </div>
       </div>
 
