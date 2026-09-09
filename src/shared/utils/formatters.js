@@ -1,12 +1,17 @@
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
+
 /**
  * Convierte un valor de fecha (Timestamp de Firestore, Date o string) a Date nativo.
+ * Los strings tipo "YYYY-MM-DD" se interpretan a mediodía local (no UTC),
+ * para evitar desfases de zona horaria en Costa Rica (UTC-6).
  * @param {any} value
  * @returns {Date}
  */
-function toDate(value) {
+export function toDate(value) {
   if (!value) return new Date()
   if (value?.toDate) return value.toDate()     // Firestore Timestamp
   if (value instanceof Date) return value
+  if (typeof value === 'string' && DATE_ONLY_REGEX.test(value)) return dateStringToDate(value)
   return new Date(value)
 }
 
@@ -37,6 +42,7 @@ export function formatDateGroup(timestamp) {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
+    timeZone: 'America/Costa_Rica',
   }).format(date)
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
@@ -51,6 +57,7 @@ export function formatDateShort(timestamp) {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: 'America/Costa_Rica',
   }).format(toDate(timestamp))
 }
 
@@ -65,6 +72,7 @@ export function formatDateLong(timestamp) {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'America/Costa_Rica',
   }).format(toDate(timestamp))
 }
 

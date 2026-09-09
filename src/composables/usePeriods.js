@@ -1,19 +1,8 @@
 import { ref } from 'vue'
 import { subscribeToAllTransactions } from '@/services/transaction.service'
+import { toDate } from '@/shared/utils/formatters'
 
 // ── Lógica pura (testeable sin Firebase) ─────────────────────────────────────
-
-/**
- * Convierte un valor de fecha (Firestore Timestamp, Date o número) a Date nativo.
- * @param {any} value
- * @returns {Date}
- */
-function toDate(value) {
-  if (!value) return new Date()
-  if (value?.toDate) return value.toDate()
-  if (value instanceof Date) return value
-  return new Date(value)
-}
 
 /**
  * Calcula la distribución de un monto neto entre los participantes del workspace.

@@ -14,17 +14,9 @@ import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useTransactionStore } from '@/stores/useTransactionStore'
 import { usePeriods, groupTransactionsByPeriod } from '@/composables/usePeriods'
 import { summarizeInvestments } from '@/composables/useInvestments'
-import { formatMonthYear, formatAmount } from '@/shared/utils/formatters'
+import { formatMonthYear, formatAmount, toDate } from '@/shared/utils/formatters'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
-
-// Reutilizar la misma conversión que usePeriods, sin importarla (es local allá)
-function toDate(value) {
-  if (!value) return new Date()
-  if (value?.toDate) return value.toDate()
-  if (value instanceof Date) return value
-  return new Date(value)
-}
 
 const MONTH_LABELS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 

@@ -28,7 +28,7 @@ const originalTx = ref(null)
 
 // Campos del formulario — reference y code se pre-llenan para transacciones manuales
 const form = reactive({
-  date: new Date().toISOString().split('T')[0],
+  date: dateToInputString(new Date()),
   description: '',
   notes: '',
   type: 'income',

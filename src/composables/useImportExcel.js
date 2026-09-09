@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { toDate } from '@/shared/utils/formatters'
 import * as XLSX from 'xlsx'
 
 // ── Helpers de parseo ─────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ export function useImportExcel() {
   function markDuplicates(existingTxs) {
     const existingKeys = new Set(
       existingTxs.map((t) => {
-        const d = t.date?.toDate ? t.date.toDate() : new Date(t.date)
+        const d = toDate(t.date)
         return `${t.reference}__${d.toDateString()}`
       })
     )
